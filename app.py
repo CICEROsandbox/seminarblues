@@ -9,7 +9,7 @@ import os
 @st.cache_data
 def load_data():
     # Update this path to where your CSV file is stored
-    df = pd.read_csv('arendalsuka_events.csv')
+    df = pd.read_csv('data/arendalsuka_events.csv')
     # Clean up and combine relevant text fields
     df['combined_text'] = df['title'] + ' ' + df['header'].fillna('') + ' ' + df['om_arrangementet'].fillna('')
     df['combined_text'] = df['combined_text'].fillna('')
