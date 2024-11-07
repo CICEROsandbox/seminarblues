@@ -87,7 +87,7 @@ def main():
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     
     # Load data
-    try:
+   try:
         with st.spinner("Loading event data..."):
             df = load_data()
     except Exception as e:
