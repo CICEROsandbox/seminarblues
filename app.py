@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from openai import OpenAI
 import numpy as np
-from scipy.spatial.distances import cosine
+from scipy.spatial.distance import cosine
 import os
 
 # Load and prepare the data
