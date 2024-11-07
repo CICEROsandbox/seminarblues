@@ -83,13 +83,8 @@ def main():
     st.title("🎯 CICERO Speaker Suggester")
     st.write("Enter a description of your breakfast seminar to find relevant speaker suggestions from Arendalsuka events.")
     
-    # Initialize OpenAI client
-    api_key = st.sidebar.text_input("Enter your OpenAI API key", type="password")
-    if not api_key:
-        st.warning("Please enter your OpenAI API key in the sidebar to continue.")
-        return
-    
-    client = OpenAI(api_key=api_key)
+# Initialize OpenAI client using secret
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     
     # Load data
     try:
