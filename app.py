@@ -85,14 +85,15 @@ def main():
     
 # Initialize OpenAI client using secret
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    
-    # Load data
-   try:
-        with st.spinner("Loading event data..."):
-            df = load_data()
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return
+
+# Load data
+try:
+    with st.spinner("Loading event data..."):
+        df = load_data()
+except Exception as e:
+    st.error(f"Error loading data: {str(e)}")
+    return
+
     
     # Create two columns for input
     col1, col2 = st.columns([2, 1])
