@@ -50,7 +50,7 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text."""
+    """Get the embedding for a given text using the updated OpenAI API."""
     try:
         openai.api_key = api_key
         response = openai.Embedding.create(
