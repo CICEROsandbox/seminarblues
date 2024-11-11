@@ -147,6 +147,10 @@ def main():
 
     # Display the OpenAI library version
     st.write(f"OpenAI Library Version: {openai.__version__}")
+
+    import sys
+    st.write(f"Python version: {sys.version}")
+
     
     # Get API key from secrets
     api_key = st.secrets["OPENAI_API_KEY"]
