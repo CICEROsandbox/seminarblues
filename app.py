@@ -227,7 +227,7 @@ def calculate_similarity(
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with emphasis on selected keywords and content relevance"""
+    """Calculate semantic similarity with improved Norwegian keyword matching"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
@@ -235,58 +235,60 @@ def calculate_similarity(
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
     # Text preprocessing
-    query_lower = query_text.lower()
-    doc_lower = doc_text.lower()
-    
-    # Word matching calculations
-    query_words = {word for word in query_lower.split() 
-                  if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
-    doc_words = {word for word in doc_lower.split() 
+    doc_words = {word for word in re.findall(r'\w+', doc_text.lower()) 
                 if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
     
-    # Find matching words
-    matched_keywords = query_words.intersection(doc_words)
-    
     # Enhanced keyword matching
-    keyword_matches = 0
+    keyword_matches = []
     matched_keywords = set()
+    
     if boost_keywords:
         for keyword in boost_keywords:
-            # Check for exact matches
-            if keyword in doc_words:
-                keyword_matches += 1
-                matched_keywords.add(keyword)
-            # Check for partial matches
-            else:
-                for doc_word in doc_words:
-                    if keyword in doc_word or doc_word in keyword:
-                        keyword_matches += 0.5  # Partial match gets half weight
-                        matched_keywords.add(keyword)
-                        break
+            best_match_score = 0
+            best_match = None
+            
+            # Check each document word for a potential match
+            for doc_word in doc_words:
+                is_related, score = are_words_related(keyword, doc_word)
+                if is_related and score > best_match_score:
+                    best_match_score = score
+                    best_match = doc_word
+            
+            if best_match_score > 0:
+                keyword_matches.append((keyword, best_match, best_match_score))
+                matched_keywords.add(f"{keyword} → {best_match}")
         
-        keyword_score = keyword_matches / len(boost_keywords)
+        # Calculate weighted keyword score
+        if keyword_matches:
+            keyword_score = sum(score for _, _, score in keyword_matches) / len(boost_keywords)
+        else:
+            keyword_score = 0
     else:
         keyword_score = 0
     
     # Calculate climate relevance
-    climate_words_doc = {word for word in doc_words if any(
-        climate_term in word for climate_term in CLIMATE_KEYWORDS
-    )}
-    climate_score = len(climate_words_doc) / (len(doc_words) + 1)  # Avoid division by zero
+    climate_words = set()
+    for word in doc_words:
+        for climate_term in CLIMATE_KEYWORDS:
+            is_related, score = are_words_related(word, climate_term)
+            if is_related:
+                climate_words.add(word)
+                break
     
-    # Calculate final score with adjusted weights
+    climate_score = len(climate_words) / (len(doc_words) + 1)
+    
+    # Calculate final score
     final_score = (
-        0.30 * max(0, cos_sim) +           # Base semantic similarity
-        0.40 * keyword_score +             # Selected keywords (increased weight)
-        0.20 * climate_score +             # Climate relevance
-        0.10 * len(matched_keywords) / (len(query_words) + 1)  # General word overlap
+        0.30 * max(0, cos_sim) +     # Semantic similarity
+        0.40 * keyword_score +        # Keyword matching
+        0.30 * climate_score         # Climate relevance
     )
     
     # Apply thresholds
-    if keyword_score == 0 and boost_keywords:  # If no keyword matches when keywords were selected
-        final_score *= 0.5  # Significant penalty
+    if keyword_score == 0 and boost_keywords:
+        final_score *= 0.5
     elif final_score > 0.8:
-        final_score = 0.8 + (final_score - 0.8) * 0.5  # Dampen very high scores
+        final_score = 0.8 + (final_score - 0.8) * 0.5
     
     return final_score, matched_keywords
 
