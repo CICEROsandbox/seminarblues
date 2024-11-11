@@ -595,7 +595,9 @@ def main():
                                 f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
                                 expanded=i<=3
                             ):
-                                cols = st.columns([2, 1])with cols[0]:
+                                cols = st.columns([2, 1])
+                                
+                                with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
                                         st.markdown("**Deltaker i arrangement:** " + 
                                                 highlight_keywords(speaker['context'], 
@@ -626,6 +628,7 @@ def main():
                                     st.markdown("**Kilde:** " + 
                                             ("Arendalsuka" if speaker['source'] == "arendalsuka" 
                                             else "Stortingshøringer"))
+                                
                                 with cols[1]:
                                     st.metric("Relevans", f"{speaker['similarity']:.1%}")
                                     # Show matched keywords
@@ -636,8 +639,7 @@ def main():
                                     if speaker['source'] == 'arendalsuka':
                                         st.markdown("[Gå til arrangement](https://arendalsuka.no)")
                                     else:
-                                        st.markdown("[Gå til høring](https://stortinget.no)")
-                        
+                                        st.markdown("[Gå til høring](https://stortinget.no)")                        
                         st.download_button(
                             "Last ned forslag som CSV",
                             pd.DataFrame(speakers).to_csv(index=False),
