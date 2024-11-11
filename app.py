@@ -48,6 +48,47 @@ CLIMATE_CATEGORIES = {
     'Samfunn og Helse': ['helse', 'luftforurensning', 'klimakommunikasjon', 'aksept']
 }
 
+def normalize_norwegian_word(word: str) -> str:
+    """Normalize Norwegian word to its base form for matching"""
+    suffixes = [
+        'ene', 'er', 'et', 'en', 'a',  # Basic noun endings
+        'ere', 'est', 'este',  # Adjective comparison forms
+    ]
+    
+    word = word.lower()
+    if len(word) > 4:
+        for suffix in suffixes:
+            if word.endswith(suffix):
+                word = word[:-len(suffix)]
+                break
+    return word
+
+def are_words_related(word1: str, word2: str) -> Tuple[bool, float]:
+    """Check if two words are related in Norwegian and return similarity score"""
+    norm1 = normalize_norwegian_word(word1)
+    norm2 = normalize_norwegian_word(word2)
+    
+    if norm1 == norm2:
+        return True, 1.0
+    
+    if norm1 in norm2 or norm2 in norm1:
+        longer = max(len(norm1), len(norm2))
+        shorter = min(len(norm1), len(norm2))
+        score = shorter / longer
+        return True, score
+    
+    common_prefixes = {
+        'klima', 'miljø', 'natur', 'energi', 'kraft', 'samfunns',
+        'bære', 'øko', 'sirkulær', 'fornybar', 'grønn', 'bio'
+    }
+    
+    for prefix in common_prefixes:
+        if (norm1.startswith(prefix) and norm2.startswith(prefix)) or \
+           (norm1.endswith(prefix) and norm2.endswith(prefix)):
+            return True, 0.8
+    
+    return False, 0.0
+
 # Configuration
 DATA_SOURCES = [
     {
