@@ -302,7 +302,7 @@ min_similarity = st.slider(
     step=0.05
 )
     
-    with col3:
+   with col3:
         selected_sources = st.multiselect(
             "Filtrer kilder:",
             options=[source["name"] for source in DATA_SOURCES],
