@@ -50,14 +50,14 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text."""
+    """Get the embedding for a given text using the OpenAI API."""
     try:
-        client = OpenAI(api_key=api_key)
-        response = client.embeddings.create(
+        openai.api_key = api_key
+        response = openai.Embedding.create(
             input=_text,
             model="text-embedding-ada-002"
         )
-        return response.data[0].embedding
+        return response['data'][0]['embedding']
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
