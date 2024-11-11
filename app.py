@@ -66,29 +66,47 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def calculate_similarity(query_embedding: List[float], doc_embedding: List[float]) -> float:
-    """Calculate semantic similarity with proper scaling"""
+def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> float:
+    """Calculate semantic similarity with improved topic filtering"""
     if not query_embedding or not doc_embedding:
         return 0.0
     
-    # Calculate base similarity
+    # Calculate base cosine similarity
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
-    # Apply non-linear scaling to better differentiate relevance levels
-    if cos_sim < 0.5:
-        return cos_sim * 0.2  # Very low relevance
-    elif cos_sim < 0.7:
-        return 0.1 + (cos_sim - 0.5) * 0.6  # Medium relevance
-    else:
-        return 0.22 + (cos_sim - 0.7) * 1.2  # High relevance
+    # Convert texts to lowercase for comparison
+    query_lower = query_text.lower()
+    doc_lower = doc_text.lower()
+    
+    # Calculate text-based relevance score
+    def get_word_overlap_score(text1: str, text2: str) -> float:
+        words1 = set(text1.split())
+        words2 = set(text2.split())
+        overlap = words1.intersection(words2)
+        union = words1.union(words2)
+        return len(overlap) / len(union) if union else 0
+
+    overlap_score = get_word_overlap_score(query_lower, doc_lower)
+    
+    # Adjust similarity based on text overlap
+    adjusted_sim = cos_sim * (0.7 + 0.3 * overlap_score)
+    
+    # Apply more aggressive scaling
+    if adjusted_sim < 0.4:  # Clear non-matches
+        final_sim = adjusted_sim * 0.1  # Heavy penalty
+    elif adjusted_sim < 0.6:  # Weak matches
+        final_sim = 0.04 + (adjusted_sim - 0.4) * 0.4
+    else:  # Strong matches
+        final_sim = 0.12 + (adjusted_sim - 0.6) * 1.5
+    
+    return final_sim
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process texts for embeddings with better progress tracking"""
+    """Process texts for embeddings with progress tracking"""
     embeddings = []
     total = len(texts)
     
-    # Create a progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -98,35 +116,44 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
             emb = get_embedding(text, _api_key)
             embeddings.append(emb)
             progress_bar.progress((i + 1) / total)
-            
-            # Add a small delay to prevent rate limiting
-            time.sleep(0.1)
-            
+            time.sleep(0.1)  # Rate limiting
         except Exception as e:
             st.error(f"Error processing document {i+1}: {str(e)}")
             embeddings.append(None)
     
     progress_bar.empty()
     status_text.empty()
+    st.write(f"Processed {len(embeddings)} embeddings")
     
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content without caching similarity calculations"""
+    """Find similar content with improved matching"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
     
-    # Calculate similarities fresh each time
+    # Calculate similarities
     similarities = []
     texts_for_debug = []
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            similarity = calculate_similarity(query_embedding, emb)
+            # Calculate similarity with both embedding and text comparison
+            similarity = calculate_similarity(
+                query_embedding, 
+                emb,
+                query_text,
+                df.iloc[i]['combined_text']
+            )
+            
             similarities.append(similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], similarity))
+            texts_for_debug.append((
+                df.iloc[i]['combined_text'][:200],
+                similarity,
+                df.iloc[i]['source']
+            ))
         else:
             similarities.append(0)
     
@@ -134,11 +161,12 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     with st.expander("Search Analysis", expanded=True):
         st.write(f"Query: '{query_text}'")
         st.write("Top matches:")
-        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
-        for text, sim in sorted_debug:
-            st.write(f"\nScore: {sim:.3f}")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:5]
+        for text, sim, source in sorted_debug:
+            st.write("\n---")
+            st.write(f"Source: {source}")
+            st.write(f"Score: {sim:.3f}")
             st.write(f"Text: {text}")
-            st.write("---")
     
     # Filter and rank results
     similarity_df = pd.DataFrame({
@@ -147,7 +175,8 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     })
     
     # Filter low relevance matches
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.3]
+    min_threshold = 0.15
+    similarity_df = similarity_df[similarity_df['similarity'] > min_threshold]
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
@@ -176,10 +205,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
-    # Add initialization status
-    status = st.empty()
-    status.text("Initializing application...")
-    
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
     
@@ -187,6 +212,14 @@ def main():
     if st.button("Clear Cache"):
         st.cache_data.clear()
         st.rerun()
+    
+    # Add topic guidance
+    st.info("""
+    💡 Tips for better results:
+    - Be specific about the topic
+    - Include key terms and concepts
+    - Mention the purpose or goal of the seminar
+    """)
 
     # Check for API key
     if "OPENAI_API_KEY" not in st.secrets:
@@ -195,8 +228,7 @@ def main():
     
     api_key = st.secrets["OPENAI_API_KEY"]
     
-    # Load data with progress tracking
-    status.text("Loading data sources...")
+    # Load data
     all_data = []
     for source_config in DATA_SOURCES:
         df = load_source_data(source_config)
@@ -207,16 +239,11 @@ def main():
         st.error("Could not load any data sources. Please check the data files.")
         st.stop()
     
-    status.text("Combining data sources...")
     df = pd.concat(all_data, ignore_index=True)
     st.write(f"Total records loaded: {len(df)}")
     
     # Process embeddings
-    status.text("Processing document embeddings...")
     cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
-    st.write(f"Processed {len(cached_embeddings)} embeddings")
-    
-    status.empty()
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -240,7 +267,7 @@ def main():
             "Minimum relevans (0-1):",
             min_value=0.0,
             max_value=1.0,
-            value=0.2,
+            value=0.15,  # Adjusted default
             step=0.05
         )
     
