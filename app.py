@@ -4,54 +4,47 @@ from openai import OpenAI
 import numpy as np
 from scipy.spatial.distance import cosine
 import os
+from typing import Dict, List, Optional
 
-class DataSource:
-    def __init__(self, name, file_path, text_columns, speaker_column, date_column=None, event_column=None):
-        """
-        Initialize a data source with its specific schema
-        
-        Parameters:
-        - name: identifier for the data source (e.g., 'arendalsuka', 'parliament')
-        - file_path: path to the CSV file
-        - text_columns: list of column names to combine for similarity matching
-        - speaker_column: column name containing speaker information
-        - date_column: optional column name for event/hearing date
-        - event_column: optional column name for event/hearing title
-        """
-        self.name = name
-        self.file_path = file_path
-        self.text_columns = text_columns
-        self.speaker_column = speaker_column
-        self.date_column = date_column
-        self.event_column = event_column
-        
-    def load_and_prepare(self):
-        """Load and prepare data from this source"""
-        df = pd.read_csv(self.file_path)
+# Define data source configurations as dictionaries
+DATA_SOURCES = [
+    {
+        "name": "arendalsuka",
+        "file_path": "data/arendalsuka_events.csv",
+        "text_columns": ['title', 'header', 'om_arrangementet'],
+        "speaker_column": 'medvirkende',
+        "date_column": 'date',
+        "event_column": 'title'
+    },
+    {
+        "name": "parliament",
+        "file_path": "data/parliament_hearings.csv",
+        "text_columns": ['hearing_title', 'description'],
+        "speaker_column": 'participants',
+        "date_column": 'hearing_date',
+        "event_column": 'hearing_title'
+    }
+]
+
+@st.cache_data
+def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
+    """Load and prepare data from a single source"""
+    try:
+        df = pd.read_csv(source_config["file_path"])
         
         # Combine specified text columns for embedding
         df['combined_text'] = ''
-        for col in self.text_columns:
+        for col in source_config["text_columns"]:
             if col in df.columns:
                 df['combined_text'] += ' ' + df[col].fillna('')
         
         df['combined_text'] = df['combined_text'].str.strip()
-        df['source'] = self.name
+        df['source'] = source_config["name"]
         
         return df
-
-@st.cache_data
-def load_all_data(data_sources):
-    """Load and combine data from all sources"""
-    all_data = []
-    for source in data_sources:
-        try:
-            df = source.load_and_prepare()
-            all_data.append(df)
-        except Exception as e:
-            st.error(f"Error loading data from {source.name}: {str(e)}")
-    
-    return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error loading data from {source_config['name']}: {str(e)}")
+        return None
 
 def get_embedding(text, client):
     """Get embeddings for a text using OpenAI"""
@@ -65,7 +58,7 @@ def get_embedding(text, client):
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def find_potential_speakers(query_text, df, embeddings, client, data_sources, top_k=5):
+def find_potential_speakers(query_text, df, embeddings, client, source_configs, top_k=5):
     """Find potential speakers based on content similarity across all sources"""
     query_embedding = get_embedding(query_text, client)
     if not query_embedding:
@@ -84,25 +77,27 @@ def find_potential_speakers(query_text, df, embeddings, client, data_sources, to
     speakers = []
     for idx in top_indices:
         entry = df.iloc[idx]
-        source = next(s for s in data_sources if s.name == entry['source'])
+        source_config = next(s for s in source_configs if s["name"] == entry['source'])
         
         # Handle different speaker formats based on source
-        if pd.notna(entry[source.speaker_column]):
-            speaker_list = entry[source.speaker_column].split('\n') if '\n' in str(entry[source.speaker_column]) else [entry[source.speaker_column]]
+        if pd.notna(entry[source_config["speaker_column"]]):
+            speaker_list = (entry[source_config["speaker_column"]].split('\n') 
+                          if '\n' in str(entry[source_config["speaker_column"]]) 
+                          else [entry[source_config["speaker_column"]]])
             
             for speaker in speaker_list:
                 if speaker.strip():
                     speaker_info = {
                         'name': speaker.strip(),
                         'similarity': similarities[idx],
-                        'source': source.name,
+                        'source': source_config["name"],
                     }
                     
                     # Add optional fields if available
-                    if source.event_column and source.event_column in entry:
-                        speaker_info['context'] = entry[source.event_column]
-                    if source.date_column and source.date_column in entry:
-                        speaker_info['date'] = entry[source.date_column]
+                    if source_config.get("event_column") and source_config["event_column"] in entry:
+                        speaker_info['context'] = entry[source_config["event_column"]]
+                    if source_config.get("date_column") and source_config["date_column"] in entry:
+                        speaker_info['date'] = entry[source_config["date_column"]]
                     
                     speakers.append(speaker_info)
     
@@ -127,33 +122,21 @@ def main():
     st.title("🎯 Event Speaker Suggester")
     st.write("Enter your event topic to find relevant speaker suggestions from various sources.")
     
-    # Define data sources
-    data_sources = [
-        DataSource(
-            name="arendalsuka",
-            file_path="data/arendalsuka_events.csv",
-            text_columns=['title', 'header', 'om_arrangementet'],
-            speaker_column='medvirkende',
-            date_column='date',
-            event_column='title'
-        ),
-        # Example additional source - adjust according to your actual data
-        DataSource(
-            name="parliament",
-            file_path="data/parliament_hearings.csv",
-            text_columns=['hearing_title', 'description'],
-            speaker_column='participants',
-            date_column='hearing_date',
-            event_column='hearing_title'
-        )
-    ]
-    
     # Initialize OpenAI client
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     
-    # Load all data
-    with st.spinner("Loading data from all sources..."):
-        df = load_all_data(data_sources)
+    # Load data from all sources
+    all_data = []
+    for source_config in DATA_SOURCES:
+        df = load_source_data(source_config)
+        if df is not None:
+            all_data.append(df)
+    
+    if not all_data:
+        st.error("No data sources could be loaded. Please check your data files and configurations.")
+        return
+        
+    df = pd.concat(all_data, ignore_index=True)
     
     # Create two columns for input
     col1, col2 = st.columns([2, 1])
@@ -184,8 +167,8 @@ def main():
         # Add source filtering
         selected_sources = st.multiselect(
             "Filter by source:",
-            options=[source.name for source in data_sources],
-            default=[source.name for source in data_sources]
+            options=[source["name"] for source in DATA_SOURCES],
+            default=[source["name"] for source in DATA_SOURCES]
         )
     
     if st.button("Find Potential Speakers", type="primary"):
@@ -202,7 +185,7 @@ def main():
                     filtered_df, 
                     embeddings,
                     client,
-                    data_sources,
+                    DATA_SOURCES,
                     top_k=num_suggestions
                 )
                 
