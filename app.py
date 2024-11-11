@@ -49,15 +49,17 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
+from openai import OpenAI
+
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text using the OpenAI API."""
+    """Cached version of get_embedding that doesn't use the client object"""
     try:
-        openai.api_key = api_key
-        response = openai.Embedding.create(
+        client = OpenAI(api_key=api_key)
+        response = client.embeddings.create(
             input=_text,
             model="text-embedding-ada-002"
         )
-        return response['data'][0]['embedding']
+        return response.data[0].embedding
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
