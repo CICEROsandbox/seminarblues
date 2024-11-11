@@ -395,9 +395,9 @@ def main():
         )
     if query:
         suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
-        if suggested_keywords:
-        st.divider()
-        st.session_state.selected_keywords = render_keyword_selection(suggested_keywords)
+            if suggested_keywords:
+            st.divider()
+            st.session_state.selected_keywords = render_keyword_selection(suggested_keywords)
                 
                 # Show selected keywords count
     if 'selected_keywords' not in st.session_state:
