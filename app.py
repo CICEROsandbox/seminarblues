@@ -363,7 +363,6 @@ def main():
                             key='download-csv'
                         )
                     else:
-                    else:
                         st.warning("Ingen deltakere møtte minimumskravet for relevans. Prøv å justere filteret.")
                 else:
                     st.warning("Fant ingen relevante forslag. Prøv å justere søkekriteriene.")
