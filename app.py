@@ -88,6 +88,45 @@ def are_words_related(word1: str, word2: str) -> Tuple[bool, float]:
             return True, 0.8
     
     return False, 0.0
+    
+def highlight_keywords(text: str, keywords: Set[str]) -> str:
+    """Highlight keywords in text with HTML styling"""
+    if not text or not keywords:
+        return text
+    
+    # Prepare text for highlighting
+    highlighted_text = text
+    
+    # Create a list of all words to highlight, including normalized forms
+    words_to_highlight = set()
+    for keyword in keywords:
+        # Handle the case where keyword contains an arrow (→) from our matching system
+        base_keyword = keyword.split(' → ')[0] if ' → ' in keyword else keyword
+        words_to_highlight.add(base_keyword)
+        
+        # Add normalized form
+        norm_keyword = normalize_norwegian_word(base_keyword)
+        words_to_highlight.add(norm_keyword)
+        
+        # Add common variations
+        for suffix in ['er', 'ene', 'et', 'en', 'a']:
+            words_to_highlight.add(norm_keyword + suffix)
+    
+    # Sort keywords by length (longest first) to avoid partial word highlighting
+    sorted_keywords = sorted(words_to_highlight, key=len, reverse=True)
+    
+    # Create regex pattern for whole word matching with Norwegian characters
+    pattern = r'\b(?:' + '|'.join(map(re.escape, sorted_keywords)) + r')\b'
+    
+    def replace_match(match):
+        """Replace matched word with highlighted version"""
+        word = match.group(0)
+        return f'<span style="background-color: #faed27; padding: 0 2px; border-radius: 3px;">{word}</span>'
+    
+    # Replace case-insensitively but preserve original case
+    highlighted_text = re.sub(pattern, replace_match, highlighted_text, flags=re.IGNORECASE)
+    
+    return highlighted_text
 
 # Configuration
 DATA_SOURCES = [
@@ -546,45 +585,63 @@ def main():
                     
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
-                    
                     if speakers:
-                        st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
-                        
-                        for i, speaker in enumerate(speakers, 1):
-                            with st.expander(
-                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
-                                expanded=False
-                            ):
-                                cols = st.columns([2, 1])
-                                with cols[0]:
-                                    if speaker['source'] == 'arendalsuka':
-                                        st.write("**Deltaker i arrangement:**", speaker['context'])
-                                        if pd.notna(speaker['content']):
-                                            st.write("**Arrangementsbeskrivelse:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-                                    else:  # parliament hearings
-                                        st.write("**Innspill til høring:**", speaker['context'])
-                                        if pd.notna(speaker['content']):
-                                            st.write("**Høringsinnspill:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-                                    
-                                    st.write("**Kilde:**", 
-                                           "Arendalsuka" if speaker['source'] == "arendalsuka" 
-                                           else "Stortingshøringer")
-                                with cols[1]:
-                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
-                                    if speaker['source'] == 'arendalsuka':
-                                        st.markdown("[Gå til arrangement](https://arendalsuka.no)")
-                                    else:
-                                        st.markdown("[Gå til høring](https://stortinget.no)")
-                        
-                        st.download_button(
-                            "Last ned forslag som CSV",
-                            pd.DataFrame(speakers).to_csv(index=False),
-                            "deltaker_forslag.csv",
-                            "text/csv",
-                            key='download-csv'
+    st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
+    
+    for i, speaker in enumerate(speakers, 1):
+        with st.expander(
+            f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
+            expanded=i<=3
+        ):
+            cols = st.columns([2, 1])
+            with cols[0]:
+                if speaker['source'] == 'arendalsuka':
+                    st.write("**Deltaker i arrangement:**", 
+                            highlight_keywords(speaker['context'], 
+                                            set(speaker['matched_keywords'])))
+                    if pd.notna(speaker['content']):
+                        st.write("**Arrangementsbeskrivelse:**")
+                        st.markdown(
+                            f'<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px;">'
+                            f'{highlight_keywords(speaker["content"], set(speaker["matched_keywords"]))}'
+                            f'</div>', 
+                            unsafe_allow_html=True
                         )
+                else:  # parliament hearings
+                    st.write("**Innspill til høring:**", 
+                            highlight_keywords(speaker['context'], 
+                                            set(speaker['matched_keywords'])))
+                    if pd.notna(speaker['content']):
+                        st.write("**Høringsinnspill:**")
+                        st.markdown(
+                            f'<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px;">'
+                            f'{highlight_keywords(speaker["content"], set(speaker["matched_keywords"]))}'
+                            f'</div>', 
+                            unsafe_allow_html=True
+                        )
+                
+                st.write("**Kilde:**", 
+                        "Arendalsuka" if speaker['source'] == "arendalsuka" 
+                        else "Stortingshøringer")
+            with cols[1]:
+                st.metric("Relevans", f"{speaker['similarity']:.1%}")
+                # Show matched keywords
+                if speaker['matched_keywords']:
+                    st.write("**Matchende nøkkelord:**")
+                    for keyword in speaker['matched_keywords']:
+                        st.markdown(f"- {keyword}")
+                if speaker['source'] == 'arendalsuka':
+                    st.markdown("[Gå til arrangement](https://arendalsuka.no)")
+                else:
+                    st.markdown("[Gå til høring](https://stortinget.no)")
+    
+    st.download_button(
+        "Last ned forslag som CSV",
+        pd.DataFrame(speakers).to_csv(index=False),
+        "deltaker_forslag.csv",
+        "text/csv",
+        key='download-csv'
+    )
                     else:
                         st.warning("Ingen deltakere møtte minimumskravet for relevans. Prøv å justere filteret.")
                 else:
