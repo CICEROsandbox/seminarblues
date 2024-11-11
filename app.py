@@ -251,7 +251,7 @@ if results:
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
-                            speaker_key = f"{speaker}_{result['index']}"  # Using 'index' instead of 'original_index'
+                            speaker_key = f"{speaker}_{result['index']}"  # Note: using 'index' not 'original_index'
                             if speaker_key not in speakers_dict or result['similarity'] > speakers_dict[speaker_key]['similarity']:
                                 speakers_dict[speaker_key] = {
                                     'name': speaker,
