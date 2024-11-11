@@ -153,6 +153,8 @@ def main():
     st.write(f"Pandas version: {pd.__version__}")
     import scipy
     st.write(f"SciPy version: {scipy.__version__}")
+    import PIL
+    st.write(f"Pillow version: {PIL.__version__}")
 
     # Get API key from secrets
     api_key = st.secrets["OPENAI_API_KEY"]
