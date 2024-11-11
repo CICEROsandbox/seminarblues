@@ -207,6 +207,32 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     # Limit total results while maintaining source balance
     return sorted(results, key=lambda x: x['similarity'], reverse=True)[:top_k]
 
+@st.cache_data
+def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
+    """Process texts for embeddings with progress tracking"""
+    embeddings = []
+    total = len(texts)
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, text in enumerate(texts):
+        try:
+            status_text.text(f"Processing document {i+1} of {total}")
+            emb = get_embedding(text, _api_key)
+            embeddings.append(emb)
+            progress_bar.progress((i + 1) / total)
+            time.sleep(0.1)  # Rate limiting
+        except Exception as e:
+            st.error(f"Error processing document {i+1}: {str(e)}")
+            embeddings.append(None)
+    
+    progress_bar.empty()
+    status_text.empty()
+    st.write(f"Processed {len(embeddings)} embeddings")
+    
+    return embeddings
+
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
@@ -268,15 +294,15 @@ def main():
             value=5
         )
         
-min_similarity = st.slider(
-    "Minimum relevans (0-1):",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.35,  # Increased from 0.15
-    step=0.05
-)
+        min_similarity = st.slider(
+            "Minimum relevans (0-1):",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.35,  # Increased from 0.15
+            step=0.05
+        )
     
-   with col3:
+    with col3:
         selected_sources = st.multiselect(
             "Filtrer kilder:",
             options=[source["name"] for source in DATA_SOURCES],
