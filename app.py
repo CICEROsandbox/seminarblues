@@ -210,7 +210,7 @@ def calculate_similarity(
     return final_score, matching_words
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        api_key: str, top_k: int = 5) -> List[Dict]:
+                        api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
     """Find similar content with climate research context"""
     # Add climate research context to the query
     climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
@@ -394,15 +394,14 @@ def main():
             placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
         )
     if query:
-            # Extract and display suggested keywords
-            suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
-            if suggested_keywords:
-                st.divider()
-                selected_keywords = render_keyword_selection(suggested_keywords)
+        suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
+        if suggested_keywords:
+        st.divider()
+        st.session_state.selected_keywords = render_keyword_selection(suggested_keywords)
                 
                 # Show selected keywords count
-                if selected_keywords:
-                    st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
+    if 'selected_keywords' not in st.session_state:
+            st.session_state.selected_keywords = set()
             else:
                 st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
     
