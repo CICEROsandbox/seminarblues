@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import openai
+from openai import OpenAI
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
 
@@ -49,21 +49,21 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text using the OpenAI API."""
+@st.cache_data
+def get_embedding(_text: str, client: OpenAI) -> Optional[List[float]]:
+    """Get embedding for a single text using OpenAI API"""
     try:
-        openai.api_key = api_key
-        response = openai.Embedding.create(
+        response = client.embeddings.create(
             input=_text,
             model="text-embedding-ada-002"
         )
-        return response['data'][0]['embedding']
+        return response.data[0].embedding
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
 @st.cache_data
-def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
+def process_texts_for_embeddings(texts: List[str], client: OpenAI) -> List[Optional[List[float]]]:
     """Process all texts and get their embeddings with caching"""
     embeddings = []
     total = len(texts)
@@ -72,7 +72,7 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     progress_bar = st.progress(0, text=progress_text)
     
     for i, text in enumerate(texts):
-        emb = get_embedding_cached(text, api_key)
+        emb = get_embedding(text, client)
         embeddings.append(emb)
         
         # Update progress
@@ -82,28 +82,34 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     progress_bar.empty()
     return embeddings
 
-def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[List[float]], 
-                         api_key: str, top_k: int = 5) -> List[Dict]:
+def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+                        client: OpenAI, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings"""
-    query_embedding = get_embedding_cached(query_text, api_key)
+    query_embedding = get_embedding(query_text, client)
     if not query_embedding:
         return []
     
     # Calculate similarities for all entries
     similarities = []
-    for i, emb in enumerate(embeddings):
+    texts_for_debug = []
+    
+    for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
-            
-            # Scale the similarity
-            scaled_similarity = cos_sim * 0.8  # Adjust scaling factor as needed
-            
+            scaled_similarity = cos_sim * 0.8
             similarities.append(scaled_similarity)
+            texts_for_debug.append((df.iloc[i]['combined_text'][:200], scaled_similarity))
         else:
             similarities.append(0)
     
-    # Create a DataFrame with similarities
+    # Show debug information
+    with st.expander("Debug Information", expanded=False):
+        st.write("Top 3 matched texts:")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
+        for text, score in sorted_debug:
+            st.write(f"Score {score:.3f}: {text}...")
+    
+    # Create similarity DataFrame
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
@@ -112,7 +118,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[Lis
     # Filter out low similarities
     similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
     
-    # Get top_k most similar entries
+    # Get top_k matches
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
@@ -120,7 +126,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[Lis
         entry = df.iloc[idx]
         source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
         
-        # Get speaker/organization info
+        # Process speakers
         speakers = []
         if pd.notna(entry[source_config["speaker_column"]]):
             if '\n' in str(entry[source_config["speaker_column"]]):
@@ -141,31 +147,24 @@ def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[Lis
 
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
-
+    
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-    # Display versions for verification
-    import sys
-    st.write(f"Python version: {sys.version}")
-    st.write(f"OpenAI Library Version: {openai.__version__}")
-    st.write(f"NumPy version: {np.__version__}")
-    st.write(f"Pandas version: {pd.__version__}")
-    import scipy
-    st.write(f"SciPy version: {scipy.__version__}")
-    import PIL
-    st.write(f"Pillow version: {PIL.__version__}")
-
-    # Get API key from secrets
-    api_key = st.secrets["OPENAI_API_KEY"]
+    # Initialize OpenAI client
+    if "OPENAI_API_KEY" not in st.secrets:
+        st.error("OpenAI API key not found in secrets!")
+        st.stop()
+    
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
     # Load data from all sources
     all_data = []
     with st.spinner("Laster inn data..."):
         for source_config in DATA_SOURCES:
-            df_source = load_source_data(source_config)
-            if df_source is not None:
-                all_data.append(df_source)
+            df = load_source_data(source_config)
+            if df is not None:
+                all_data.append(df)
     
     if not all_data:
         st.error("Kunne ikke laste inn data. Sjekk datakildene.")
@@ -173,11 +172,11 @@ def main():
         
     df = pd.concat(all_data, ignore_index=True)
     
-    # Pre-compute embeddings for all texts (cached)
+    # Pre-compute embeddings
     with st.spinner("Forbereder søkefunksjonalitet..."):
-        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), client)
     
-    # Create three columns for input and filters
+    # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
@@ -216,14 +215,14 @@ def main():
             with st.spinner("Søker etter relevante deltakere..."):
                 # Filter by selected sources
                 source_mask = df['source'].isin(selected_sources)
-                filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices
+                filtered_df = df[source_mask].reset_index(drop=True)
                 filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
                 
                 results = find_similar_content(
                     query, 
                     filtered_df, 
                     filtered_embeddings,
-                    api_key, 
+                    client, 
                     top_k=num_suggestions
                 )
                 
@@ -247,13 +246,12 @@ def main():
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
                     if speakers:
-                        # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
                         for i, speaker in enumerate(speakers, 1):
                             with st.expander(
-                                f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.1f}% relevans", 
-                                expanded=False
+                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
+                                expanded=i<=3
                             ):
                                 cols = st.columns([2, 1])
                                 with cols[0]:
@@ -269,14 +267,14 @@ def main():
                                             st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
                                     
                                     st.write("**Kilde:**", 
-                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
-                                            else "Stortingshøringer")
+                                           "Arendalsuka" if speaker['source'] == "arendalsuka" 
+                                           else "Stortingshøringer")
                                 with cols[1]:
-                                    st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
+                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
                                     if speaker['source'] == 'arendalsuka':
-                                        st.markdown(f"[Gå til arrangement](https://arendalsuka.no)")
+                                        st.markdown("[Gå til arrangement](https://arendalsuka.no)")
                                     else:
-                                        st.markdown(f"[Gå til høring](https://stortinget.no)")
+                                        st.markdown("[Gå til høring](https://stortinget.no)")
                         
                         # Add download button
                         st.download_button(
