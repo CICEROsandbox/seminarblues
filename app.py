@@ -108,8 +108,9 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             keyword_overlap = sum(1 for kw in keywords if kw in entry_text)
             boost_factor = 0.05 * keyword_overlap  # Adjust boost as needed
             
-            # Apply boosted similarity
-            final_similarity = scaled_similarity + boost_factor
+            # Cap the similarity score at 1.0 (100%) to avoid high percentages over 100%
+            final_similarity = min(scaled_similarity + boost_factor, 1.0)
+
             similarities.append(final_similarity)
         else:
             similarities.append(0)
@@ -250,11 +251,35 @@ def main():
                         # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
-                        for i, speaker in enumerate(speakers, 1):
-                            with st.expander(
-                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
-                                expanded=i<=3
-                            ):
+for i, speaker in enumerate(speakers, 1):
+    # Create a preview of the content for the collapsed state (first 200 characters)
+    preview_text = speaker['content'][:200] + "..." if len(speaker['content']) > 200 else speaker['content']
+    
+    # Display collapsed label with name, organization, and preview
+    collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
+    
+    with st.expander(collapsed_label, expanded=i<=3):  # Show the first 3 expanded by default
+        cols = st.columns([2, 1])
+        with cols[0]:
+            if speaker['source'] == 'arendalsuka':
+                st.write("**Deltaker i arrangement:**", speaker['context'])
+                if pd.notna(speaker['content']):
+                    st.write("**Arrangementsbeskrivelse:**")
+                    st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+            else:  # parliament hearings
+                st.write("**Innspill til høring:**", speaker['context'])
+                if pd.notna(speaker['content']):
+                    st.write("**Høringsinnspill:**")
+                    st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+            
+            st.write("**Kilde:**", "Arendalsuka" if speaker['source'] == "arendalsuka" else "Stortingshøringer")
+        with cols[1]:
+            st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
+            if speaker['source'] == 'arendalsuka':
+                st.markdown(f"[Gå til arrangement](arendalsuka.no)")
+            else:
+                st.markdown(f"[Gå til høring](stortinget.no)")
+
                                 cols = st.columns([2, 1])
                                 with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
