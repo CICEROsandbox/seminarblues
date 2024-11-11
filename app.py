@@ -4,6 +4,7 @@ import numpy as np
 from openai import OpenAI
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
+import time
 
 # Configuration
 DATA_SOURCES = [
@@ -27,10 +28,11 @@ DATA_SOURCES = [
     }
 ]
 
-@st.cache_data
+@st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source"""
     try:
+        st.write(f"Loading data from {source_config['name']}...")
         separator = source_config.get("separator", ",")
         df = pd.read_csv(source_config["file_path"], sep=separator)
         df = df.dropna(how='all')
@@ -44,12 +46,13 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         df['combined_text'] = df['combined_text'].str.strip()
         df['source'] = source_config["name"]
         
+        st.write(f"Loaded {len(df)} rows from {source_config['name']}")
         return df
     except Exception as e:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-@st.cache_data(ttl=0)
+@st.cache_data(ttl=300)
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text"""
     try:
@@ -63,55 +66,67 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
+def calculate_similarity(query_embedding: List[float], doc_embedding: List[float]) -> float:
+    """Calculate semantic similarity with proper scaling"""
+    if not query_embedding or not doc_embedding:
+        return 0.0
+    
+    # Calculate base similarity
+    cos_sim = 1 - cosine(query_embedding, doc_embedding)
+    
+    # Apply non-linear scaling to better differentiate relevance levels
+    if cos_sim < 0.5:
+        return cos_sim * 0.2  # Very low relevance
+    elif cos_sim < 0.7:
+        return 0.1 + (cos_sim - 0.5) * 0.6  # Medium relevance
+    else:
+        return 0.22 + (cos_sim - 0.7) * 1.2  # High relevance
+
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process texts with semantic context"""
+    """Process texts for embeddings with better progress tracking"""
     embeddings = []
     total = len(texts)
     
-    progress_text = "Processing documents..."
-    progress_bar = st.progress(0, text=progress_text)
+    # Create a progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
     for i, text in enumerate(texts):
-        emb = get_embedding(text, _api_key)
-        embeddings.append(emb)
-        
-        progress = (i + 1) / total
-        progress_bar.progress(progress, text=f"{progress_text} ({i+1}/{total})")
+        try:
+            status_text.text(f"Processing document {i+1} of {total}")
+            emb = get_embedding(text, _api_key)
+            embeddings.append(emb)
+            progress_bar.progress((i + 1) / total)
+            
+            # Add a small delay to prevent rate limiting
+            time.sleep(0.1)
+            
+        except Exception as e:
+            st.error(f"Error processing document {i+1}: {str(e)}")
+            embeddings.append(None)
     
     progress_bar.empty()
+    status_text.empty()
+    
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content with general semantic matching"""
+    """Find similar content without caching similarity calculations"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
     
-    # Calculate similarities
+    # Calculate similarities fresh each time
     similarities = []
     texts_for_debug = []
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Calculate cosine similarity
-            cos_sim = 1 - cosine(query_embedding, emb)
-            
-            # Apply scaling that works for any topic
-            if cos_sim < 0.5:  # Clear non-matches
-                scaled_similarity = cos_sim * 0.2
-            elif cos_sim < 0.7:  # Partial matches
-                scaled_similarity = 0.1 + (cos_sim - 0.5)
-            else:  # Good matches
-                scaled_similarity = 0.3 + (cos_sim - 0.7) * 2
-            
-            similarities.append(scaled_similarity)
-            texts_for_debug.append((
-                df.iloc[i]['combined_text'][:200],
-                cos_sim,
-                scaled_similarity
-            ))
+            similarity = calculate_similarity(query_embedding, emb)
+            similarities.append(similarity)
+            texts_for_debug.append((df.iloc[i]['combined_text'][:200], similarity))
         else:
             similarities.append(0)
     
@@ -119,10 +134,9 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     with st.expander("Search Analysis", expanded=True):
         st.write(f"Query: '{query_text}'")
         st.write("Top matches:")
-        sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:3]
-        for text, raw_sim, scaled_sim in sorted_debug:
-            st.write(f"\nRaw similarity: {raw_sim:.3f}")
-            st.write(f"Adjusted score: {scaled_sim:.3f}")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
+        for text, sim in sorted_debug:
+            st.write(f"\nScore: {sim:.3f}")
             st.write(f"Text: {text}")
             st.write("---")
     
@@ -162,6 +176,10 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
+    # Add initialization status
+    status = st.empty()
+    status.text("Initializing application...")
+    
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
     
@@ -170,30 +188,35 @@ def main():
         st.cache_data.clear()
         st.rerun()
 
-    # Initialize OpenAI client
+    # Check for API key
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("OpenAI API key not found in secrets!")
         st.stop()
     
     api_key = st.secrets["OPENAI_API_KEY"]
     
-    # Load and process data
+    # Load data with progress tracking
+    status.text("Loading data sources...")
     all_data = []
-    with st.spinner("Laster inn data..."):
-        for source_config in DATA_SOURCES:
-            df = load_source_data(source_config)
-            if df is not None:
-                all_data.append(df)
+    for source_config in DATA_SOURCES:
+        df = load_source_data(source_config)
+        if df is not None:
+            all_data.append(df)
     
     if not all_data:
-        st.error("Kunne ikke laste inn data. Sjekk datakildene.")
-        return
-        
-    df = pd.concat(all_data, ignore_index=True)
+        st.error("Could not load any data sources. Please check the data files.")
+        st.stop()
     
-    # Pre-compute embeddings
-    with st.spinner("Analyserer innhold..."):
-        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+    status.text("Combining data sources...")
+    df = pd.concat(all_data, ignore_index=True)
+    st.write(f"Total records loaded: {len(df)}")
+    
+    # Process embeddings
+    status.text("Processing document embeddings...")
+    cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+    st.write(f"Processed {len(cached_embeddings)} embeddings")
+    
+    status.empty()
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
