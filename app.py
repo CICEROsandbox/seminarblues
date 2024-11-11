@@ -84,7 +84,7 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         return None
 
 def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with normalized scoring"""
+    """Calculate semantic similarity with normalized scoring and stop words filtering"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
@@ -95,23 +95,24 @@ def calculate_similarity(query_embedding: List[float], doc_embedding: List[float
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Calculate word overlap ratio
-    query_words = set(query_lower.split())
-    doc_words = set(doc_lower.split())
+    # Calculate meaningful word overlap (excluding stop words)
+    query_words = {word for word in query_lower.split() if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+    doc_words = {word for word in doc_lower.split() if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
     matching_words = query_words.intersection(doc_words)
+    
+    # Calculate overlap ratio only for meaningful words
     overlap_ratio = len(matching_words) / len(query_words) if query_words else 0
     
-    # Check for key terms in the first 50 words
-    first_words = ' '.join(doc_lower.split()[:50])
+    # Check for key terms in the first 100 words (expanded window)
+    first_words = ' '.join(doc_lower.split()[:100])
     important_words_count = sum(1 for word in query_words if word in first_words)
     early_match_ratio = important_words_count / len(query_words) if query_words else 0
     
-    # Calculate final score with weighted components
-    # Base similarity (50%), word overlap (30%), early matches (20%)
+    # Calculate final score with emphasis on semantic similarity
     final_score = (
-        0.65 * max(0, cos_sim) +  # Ensure non-negative
-        0.30 * overlap_ratio +
-        0.05 * early_match_ratio
+        0.80 * max(0, cos_sim) +      # Heavy emphasis on semantic similarity
+        0.15 * overlap_ratio +         # Some weight for meaningful word matches
+        0.05 * early_match_ratio       # Small boost for early matches
     )
     
     # Apply threshold adjustments
