@@ -19,7 +19,7 @@ DATA_SOURCES = [
     },
     {
         "name": "parliament_hearings",
-        "file_path": "data/Stortinget-horinger.csv",
+        "file_path": "data/stortinget-hearings.csv",
         "text_columns": ['Høringssak', 'Innhold - høring'],  # Combining hearing title and content
         "speaker_column": 'Innsender',  # Organization/person submitting the response
         "event_column": 'Høringssak',
