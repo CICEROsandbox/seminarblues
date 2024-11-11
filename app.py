@@ -50,19 +50,13 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 @st.cache_data
+@st.cache_data
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
-    """Get embedding with semantic preprocessing"""
+    """Get embedding for a single text"""
     try:
         client = OpenAI(api_key=_api_key)
-        # Expand the query to capture semantic meaning
-        enriched_text = (
-            f"Topic and key concepts: {_text}\n"
-            f"This text should be matched with content about: {_text}\n"
-            f"Key themes and related areas: {_text}"
-        )
-        
         response = client.embeddings.create(
-            input=enriched_text,
+            input=_text,
             model="text-embedding-ada-002"
         )
         return response.data[0].embedding
@@ -70,24 +64,96 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
+# Remove caching for the similarity calculation
+def calculate_similarity(query_embedding: List[float], doc_embedding: List[float]) -> float:
+    """Calculate semantic similarity with proper scaling"""
+    if not query_embedding or not doc_embedding:
+        return 0.0
+    
+    # Calculate base similarity
+    cos_sim = 1 - cosine(query_embedding, doc_embedding)
+    
+    # Apply non-linear scaling to better differentiate relevance levels
+    if cos_sim < 0.5:
+        return cos_sim * 0.2  # Very low relevance
+    elif cos_sim < 0.7:
+        return 0.1 + (cos_sim - 0.5) * 0.6  # Medium relevance
+    else:
+        return 0.22 + (cos_sim - 0.7) * 1.2  # High relevance
+
+def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+                        _api_key: str, top_k: int = 5) -> List[Dict]:
+    """Find similar content without caching similarity calculations"""
+    query_embedding = get_embedding(query_text, _api_key)
+    if not query_embedding:
+        return []
+    
+    # Calculate similarities fresh each time
+    similarities = []
+    texts_for_debug = []
+    
+    for i, emb in enumerate(cached_embeddings):
+        if emb:
+            similarity = calculate_similarity(query_embedding, emb)
+            similarities.append(similarity)
+            texts_for_debug.append((df.iloc[i]['combined_text'][:200], similarity))
+        else:
+            similarities.append(0)
+    
+    # Debug information
+    with st.expander("Search Debug", expanded=True):
+        st.write(f"Query: '{query_text}'")
+        st.write("Top matches:")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
+        for text, sim in sorted_debug:
+            st.write(f"\nScore: {sim:.3f}")
+            st.write(f"Text: {text}")
+            st.write("---")
+    
+    # Create DataFrame for filtering
+    similarity_df = pd.DataFrame({
+        'index': range(len(similarities)),
+        'similarity': similarities
+    })
+    
+    # Filter low relevance results
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
+    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
+    
+    results = []
+    for idx in top_indices:
+        entry = df.iloc[idx]
+        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
+        
+        speakers = []
+        if pd.notna(entry[source_config["speaker_column"]]):
+            if '\n' in str(entry[source_config["speaker_column"]]):
+                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
+            else:
+                speakers = [entry[source_config["speaker_column"]].strip()]
+        
+        results.append({
+            'index': idx,
+            'speakers': speakers,
+            'similarity': float(similarities[idx]),
+            'source': entry['source'],
+            'context': entry.get(source_config["event_column"], ''),
+            'content': entry.get(source_config["content_column"], ''),
+        })
+    
+    return results
+
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process texts with semantic context"""
+    """Cache only the initial embeddings, not the similarity calculations"""
     embeddings = []
     total = len(texts)
     
-    progress_text = "Analyzing text content..."
+    progress_text = "Processing documents..."
     progress_bar = st.progress(0, text=progress_text)
     
     for i, text in enumerate(texts):
-        # Enrich the content text with structural context
-        enriched_text = (
-            f"Event or hearing description: {text}\n"
-            f"Main topics and themes: {text}\n"
-            f"Key concepts and subject areas: {text}"
-        )
-        
-        emb = get_embedding(enriched_text, _api_key)
+        emb = get_embedding(text, _api_key)
         embeddings.append(emb)
         
         progress = (i + 1) / total
