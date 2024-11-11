@@ -510,7 +510,7 @@ def main():
                         for i, speaker in enumerate(speakers, 1):
                             with st.expander(
                                 f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
-                                expanded=i<=3
+                                expanded=False
                             ):
                                 cols = st.columns([2, 1])
                                 with cols[0]:
