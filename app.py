@@ -169,7 +169,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             similarities.append(0)
     
     # Enhanced debug information
-    with st.expander("Search Analysis", expanded=True):
+    with st.expander("Search Analysis", expanded=False):
         st.write(f"Query: '{query_text}'")
         st.write("Top matches:")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:5]
