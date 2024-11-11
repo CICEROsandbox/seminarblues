@@ -50,9 +50,10 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 @st.cache_data
-def get_embedding(_text: str, client: OpenAI) -> Optional[List[float]]:
+def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text using OpenAI API"""
     try:
+        client = OpenAI(api_key=_api_key)
         response = client.embeddings.create(
             input=_text,
             model="text-embedding-ada-002"
@@ -63,7 +64,7 @@ def get_embedding(_text: str, client: OpenAI) -> Optional[List[float]]:
         return None
 
 @st.cache_data
-def process_texts_for_embeddings(texts: List[str], client: OpenAI) -> List[Optional[List[float]]]:
+def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
     """Process all texts and get their embeddings with caching"""
     embeddings = []
     total = len(texts)
@@ -72,7 +73,7 @@ def process_texts_for_embeddings(texts: List[str], client: OpenAI) -> List[Optio
     progress_bar = st.progress(0, text=progress_text)
     
     for i, text in enumerate(texts):
-        emb = get_embedding(text, client)
+        emb = get_embedding(text, _api_key)
         embeddings.append(emb)
         
         # Update progress
@@ -83,9 +84,9 @@ def process_texts_for_embeddings(texts: List[str], client: OpenAI) -> List[Optio
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        client: OpenAI, top_k: int = 5) -> List[Dict]:
+                        _api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings"""
-    query_embedding = get_embedding(query_text, client)
+    query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
     
@@ -109,16 +110,12 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         for text, score in sorted_debug:
             st.write(f"Score {score:.3f}: {text}...")
     
-    # Create similarity DataFrame
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
     })
     
-    # Filter out low similarities
     similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
-    
-    # Get top_k matches
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
@@ -126,7 +123,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         entry = df.iloc[idx]
         source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
         
-        # Process speakers
         speakers = []
         if pd.notna(entry[source_config["speaker_column"]]):
             if '\n' in str(entry[source_config["speaker_column"]]):
@@ -151,12 +147,12 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-    # Initialize OpenAI client
+    # Get API key from secrets
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("OpenAI API key not found in secrets!")
         st.stop()
     
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    api_key = st.secrets["OPENAI_API_KEY"]
 
     # Load data from all sources
     all_data = []
@@ -174,7 +170,7 @@ def main():
     
     # Pre-compute embeddings
     with st.spinner("Forbereder søkefunksjonalitet..."):
-        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), client)
+        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -213,7 +209,6 @@ def main():
     if st.button("Finn deltakere", type="primary"):
         if query:
             with st.spinner("Søker etter relevante deltakere..."):
-                # Filter by selected sources
                 source_mask = df['source'].isin(selected_sources)
                 filtered_df = df[source_mask].reset_index(drop=True)
                 filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
@@ -222,12 +217,11 @@ def main():
                     query, 
                     filtered_df, 
                     filtered_embeddings,
-                    client, 
+                    api_key, 
                     top_k=num_suggestions
                 )
                 
                 if results:
-                    # Process speakers
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
@@ -241,7 +235,6 @@ def main():
                                     'source': result['source']
                                 }
                     
-                    # Convert to list and sort
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
@@ -276,7 +269,6 @@ def main():
                                     else:
                                         st.markdown("[Gå til høring](https://stortinget.no)")
                         
-                        # Add download button
                         st.download_button(
                             "Last ned forslag som CSV",
                             pd.DataFrame(speakers).to_csv(index=False),
