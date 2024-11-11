@@ -3,26 +3,9 @@ import streamlit as st
 from openai import OpenAI
 import numpy as np
 from scipy.spatial.distance import cosine
-import os
 from typing import Dict, List, Optional
 
-# System instructions for the GPT context
-SYSTEM_INSTRUCTIONS = """
-Du er en erfaren rådgiver som skal hjelpe med å finne relevante deltakere til seminarer og arrangementer. 
-Din oppgave er å:
-1. Analysere seminar-temaet som blir foreslått
-2. Identifisere relevante personer og organisasjoner fra de tilgjengelige kildene (Arendalsuka og Stortingshøringer)
-3. Forklare hvorfor disse vil være relevante deltakere basert på deres tidligere engasjement
-4. Vurdere balansen mellom ulike perspektiver og interesser
-5. Gi konkrete anbefalinger om hvem som bør inviteres og hvorfor
-
-Vær spesielt oppmerksom på:
-- Aktualitet og relevans til tema
-- Balanse mellom ulike synspunkter og interesser
-- Kombinasjon av praktisk erfaring og faglig ekspertise
-- Representasjon fra både organisasjoner og enkeltpersoner
-"""
-
+# Basic configuration
 DATA_SOURCES = [
     {
         "name": "arendalsuka",
@@ -42,64 +25,79 @@ DATA_SOURCES = [
     }
 ]
 
-# Rest of the code remains the same until the find_potential_speakers function
-
-def get_gpt_analysis(query: str, suggestions: List[Dict], client: OpenAI) -> str:
-    """Get GPT analysis of the suggestions based on the seminar topic"""
+@st.cache_data
+def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
+    """Load and prepare data from a single source"""
     try:
-        # Prepare the context
-        context = f"""
-Seminartema: {query}
-
-Potensielle deltakere basert på tidligere engasjement:
-"""
-        for s in suggestions:
-            context += f"\n- {s['name']} (fra {s['source']})"
-            if 'context' in s:
-                context += f"\n  Kontekst: {s['context']}"
-
-        # Get GPT analysis
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": SYSTEM_INSTRUCTIONS},
-                {"role": "user", "content": context}
-            ]
-        )
+        separator = source_config.get("separator", ",")
+        df = pd.read_csv(source_config["file_path"], sep=separator)
+        df = df.dropna(how='all')
         
-        return response.choices[0].message.content
+        # Combine specified text columns for embedding
+        df['combined_text'] = ''
+        for col in source_config["text_columns"]:
+            if col in df.columns:
+                df['combined_text'] += ' ' + df[col].fillna('')
+        
+        df['combined_text'] = df['combined_text'].str.strip()
+        df['source'] = source_config["name"]
+        
+        return df
     except Exception as e:
-        st.error(f"Error getting GPT analysis: {str(e)}")
+        st.error(f"Error loading data from {source_config['name']}: {str(e)}")
+        return None
+
+def get_embedding(text, client):
+    try:
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-ada-002"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        st.error(f"Error getting embedding: {str(e)}")
         return None
 
 def main():
-    st.set_page_config(
-        page_title="Seminar Deltaker Forslag",
-        page_icon="🎯",
-        layout="wide"
-    )
+    st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯")
     
     st.title("🎯 Seminar Deltaker Forslag")
-    st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere basert på tidligere arrangementer og høringer.")
-    
-    # Rest of the main function remains the same until after getting suggestions
-    
-    if st.button("Finn potensielle deltakere", type="primary"):
-        if query:
-            with st.spinner("Analyserer innhold..."):
-                # Previous suggestion code remains the same
-                
-                if suggestions:
-                    # Get GPT analysis
-                    with st.spinner("Analyserer forslag..."):
-                        analysis = get_gpt_analysis(query, suggestions, client)
-                        if analysis:
-                            st.subheader("Analyse og anbefalinger")
-                            st.write(analysis)
-                    
-                    # Show detailed suggestions
-                    st.subheader(f"Fant {len(suggestions)} potensielle deltakere")
-                    
-                    # Rest of the display code remains the same
+    st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-# Rest of the code remains the same
+    # Initialize OpenAI client
+    try:
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    except Exception as e:
+        st.error(f"Error initializing OpenAI client: {str(e)}")
+        return
+
+    # Load data from all sources
+    all_data = []
+    for source_config in DATA_SOURCES:
+        df = load_source_data(source_config)
+        if df is not None:
+            all_data.append(df)
+    
+    if not all_data:
+        st.error("Kunne ikke laste inn data. Sjekk datakildene.")
+        return
+        
+    df = pd.concat(all_data, ignore_index=True)
+    
+    # Basic input
+    query = st.text_area(
+        "Beskriv seminar-temaet:",
+        height=100,
+        placeholder="Eksempel: Et seminar om karbonfangst og lagring i Norge, med fokus på politiske rammeverk og industrisamarbeid."
+    )
+
+    if st.button("Finn deltakere", type="primary"):
+        if query:
+            st.success("Data lastet inn og klar for analyse!")
+            st.write(f"Antall kilder lastet: {len(all_data)}")
+            st.write(f"Totalt antall rader: {len(df)}")
+        else:
+            st.warning("Vennligst beskriv seminar-temaet.")
+
+if __name__ == "__main__":
+    main()
