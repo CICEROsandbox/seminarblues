@@ -85,7 +85,7 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content using pre-computed embeddings"""
+    """Find similar content using pre-computed embeddings with improved relevance scoring"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
@@ -96,26 +96,42 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
+            # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
-            scaled_similarity = cos_sim * 0.8
+            
+            # Apply more aggressive scaling to better differentiate relevance
+            # This will push down less relevant results more dramatically
+            scaled_similarity = (cos_sim ** 1.5) * 0.95  # Exponential scaling
+            
+            # Additional penalty for very low similarities
+            if cos_sim < 0.5:  # Threshold for "weak" matches
+                scaled_similarity *= 0.5  # Further reduce weak matches
+            
             similarities.append(scaled_similarity)
             texts_for_debug.append((df.iloc[i]['combined_text'][:200], scaled_similarity))
         else:
             similarities.append(0)
     
-    # Show debug information
+    # Show debug information with more detail
     with st.expander("Debug Information", expanded=False):
-        st.write("Top 3 matched texts:")
+        st.write("Top 3 matched texts (with raw and scaled scores):")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
         for text, score in sorted_debug:
-            st.write(f"Score {score:.3f}: {text}...")
+            raw_sim = 1 - cosine(query_embedding, cached_embeddings[texts_for_debug.index((text, score))])
+            st.write(f"Raw score: {raw_sim:.3f}, Scaled score: {score:.3f}")
+            st.write(f"Text: {text}...")
+            st.write("---")
     
+    # Create similarity DataFrame with higher minimum threshold
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
     })
     
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
+    # More aggressive filtering of low-relevance results
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.3]  # Increased threshold
+    
+    # Get top_k matches
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
