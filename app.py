@@ -1,7 +1,7 @@
-import pandas as pd
 import streamlit as st
-import openai
+import pandas as pd
 import numpy as np
+import openai
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
 
@@ -50,7 +50,7 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text using the updated OpenAI API."""
+    """Get the embedding for a given text using the OpenAI API."""
     try:
         openai.api_key = api_key
         response = openai.Embedding.create(
@@ -141,17 +141,19 @@ def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[Lis
 
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
-    
+
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-    # Display the OpenAI library version
-    st.write(f"OpenAI Library Version: {openai.__version__}")
-
+    # Display versions for verification
     import sys
     st.write(f"Python version: {sys.version}")
+    st.write(f"OpenAI Library Version: {openai.__version__}")
+    st.write(f"NumPy version: {np.__version__}")
+    st.write(f"Pandas version: {pd.__version__}")
+    import scipy
+    st.write(f"SciPy version: {scipy.__version__}")
 
-    
     # Get API key from secrets
     api_key = st.secrets["OPENAI_API_KEY"]
 
@@ -159,9 +161,9 @@ def main():
     all_data = []
     with st.spinner("Laster inn data..."):
         for source_config in DATA_SOURCES:
-            df = load_source_data(source_config)
-            if df is not None:
-                all_data.append(df)
+            df_source = load_source_data(source_config)
+            if df_source is not None:
+                all_data.append(df_source)
     
     if not all_data:
         st.error("Kunne ikke laste inn data. Sjekk datakildene.")
@@ -270,9 +272,9 @@ def main():
                                 with cols[1]:
                                     st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
                                     if speaker['source'] == 'arendalsuka':
-                                        st.markdown(f"[Gå til arrangement](arendalsuka.no)")
+                                        st.markdown(f"[Gå til arrangement](https://arendalsuka.no)")
                                     else:
-                                        st.markdown(f"[Gå til høring](stortinget.no)")
+                                        st.markdown(f"[Gå til høring](https://stortinget.no)")
                         
                         # Add download button
                         st.download_button(
