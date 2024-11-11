@@ -51,17 +51,18 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
 
 @st.cache_data
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Cached version of get_embedding that doesn't use the client object"""
+    """Get the embedding for a given text."""
     try:
-        client = OpenAI(api_key=api_key)
-        response = client.embeddings.create(
+        openai.api_key = api_key
+        response = openai.Embedding.create(
             input=_text,
             model="text-embedding-ada-002"
         )
-        return response.data[0].embedding
+        return response['data'][0]['embedding']
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
+
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
@@ -145,11 +146,12 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             'speakers': speakers,
             'similarity': float(similarities[idx]),
             'source': entry['source'],
-            'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
-            'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
+            'context': entry.get(source_config["event_column"], ''),
+            'content': entry.get(source_config["content_column"], ''),
         })
     
     return results
+
 
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
@@ -212,21 +214,23 @@ def main():
             format_func=lambda x: "Arendalsuka" if x == "arendalsuka" else "Stortingshøringer"
         )
 
-    if st.button("Finn deltakere", type="primary"):
-        if query:
-            with st.spinner("Søker etter relevante deltakere..."):
-                # Filter by selected sources
-                source_mask = df['source'].isin(selected_sources)
-                filtered_df = df[source_mask]
-                filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
-                
-                results = find_similar_content(
-                    query, 
-                    filtered_df, 
-                    filtered_embeddings,
-                    api_key, 
-                    top_k=num_suggestions
-                )
+if st.button("Finn deltakere", type="primary"):
+    if query:
+        with st.spinner("Søker etter relevante deltakere..."):
+            # Filter by selected sources
+            source_mask = df['source'].isin(selected_sources)
+            filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices here
+            filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
+            
+            results = find_similar_content(
+                query, 
+                filtered_df, 
+                filtered_embeddings,
+                api_key, 
+                top_k=num_suggestions
+            )
+            # ... rest of your code ...
+
                 
                 if results:
                     # Process speakers with better tracking of sources
