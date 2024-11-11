@@ -266,7 +266,7 @@ if results:
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
   
                     for speaker in result['speakers']:
-                    speaker_key = f"{speaker}_{result['original_index']}" 
+speaker_key = f"{speaker}_{result['original_index']}" 
                             
                     # Find this section in the main() function, around line 250-300:
 
