@@ -204,7 +204,7 @@ def calculate_similarity(
                 if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
     
     # Find matching words
-    matching_words = query_words.intersection(doc_words)
+    matched_keywords = query_words.intersection(doc_words)
     
     # Enhanced keyword matching
     keyword_matches = 0
@@ -238,7 +238,7 @@ def calculate_similarity(
         0.30 * max(0, cos_sim) +           # Base semantic similarity
         0.40 * keyword_score +             # Selected keywords (increased weight)
         0.20 * climate_score +             # Climate relevance
-        0.10 * len(matching_words) / (len(query_words) + 1)  # General word overlap
+        0.10 * len(matched_keywords) / (len(query_words) + 1)  # General word overlap
     )
     
     # Apply thresholds
@@ -278,7 +278,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 'index': i,
                 'score': similarity,
                 'source': df.iloc[i]['source'],
-                'matched_keywords': matched_keywords
+                'matched_keywords': matched_keywords  # Changed from matching_words
             })
             
             texts_for_debug.append((
@@ -287,6 +287,13 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 df.iloc[i]['source'],
                 matched_keywords
             ))
+        else:
+            similarities.append({
+                'index': i,
+                'score': 0,
+                'source': df.iloc[i]['source'],
+                'matched_keywords': set()  # Changed from matching_words
+            })
     
     # Enhanced debug information
     with st.expander("Search Analysis", expanded=False):
@@ -303,20 +310,16 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 st.write(f"Matched keywords: {', '.join(keywords)}")
             st.write(f"Text preview: {text}")
     
-    # [Rest of the function remains the same...]
-    
     # Filter and group results by source
-    max_per_source = min(3, top_k)  # Maximum results per source
+    max_per_source = min(3, top_k)
     results_by_source = {}
     
-    # Sort similarities by score
     sorted_similarities = sorted(
-        [s for s in similarities if isinstance(s, dict) and s['score'] > 0.2],  # Minimum threshold
+        [s for s in similarities if isinstance(s, dict) and s['score'] > 0.2],
         key=lambda x: x['score'],
         reverse=True
     )
     
-    # Group by source while respecting max_per_source
     for sim in sorted_similarities:
         source = sim['source']
         if source not in results_by_source:
@@ -324,7 +327,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         if len(results_by_source[source]) < max_per_source:
             results_by_source[source].append(sim)
     
-    # Prepare final results
     results = []
     for source_results in results_by_source.values():
         for sim in source_results:
@@ -332,7 +334,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             entry = df.iloc[idx]
             source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
             
-            # Process speakers
             speakers = []
             if pd.notna(entry[source_config["speaker_column"]]):
                 if '\n' in str(entry[source_config["speaker_column"]]):
@@ -347,12 +348,11 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 'source': entry['source'],
                 'context': entry.get(source_config["event_column"], ''),
                 'content': entry.get(source_config["content_column"], ''),
-                'matching_words': list(sim['matching_words'])
+                'matched_keywords': list(sim['matched_keywords'])  # Changed from matching_words
             })
     
-    # Limit total results while maintaining source balance
     return sorted(results, key=lambda x: x['similarity'], reverse=True)[:top_k]
-
+                            
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
     """Process texts for embeddings with progress tracking"""
