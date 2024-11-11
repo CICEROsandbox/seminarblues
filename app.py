@@ -105,32 +105,6 @@ def calculate_similarity(query_embedding: List[float], doc_embedding: List[float
     
     return final_score, matching_words
 
-@st.cache_data
-def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process texts for embeddings with progress tracking"""
-    embeddings = []
-    total = len(texts)
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for i, text in enumerate(texts):
-        try:
-            status_text.text(f"Processing document {i+1} of {total}")
-            emb = get_embedding(text, _api_key)
-            embeddings.append(emb)
-            progress_bar.progress((i + 1) / total)
-            time.sleep(0.1)  # Rate limiting
-        except Exception as e:
-            st.error(f"Error processing document {i+1}: {str(e)}")
-            embeddings.append(None)
-    
-    progress_bar.empty()
-    status_text.empty()
-    st.write(f"Processed {len(embeddings)} embeddings")
-    
-    return embeddings
-
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content with improved matching and per-source limits"""
