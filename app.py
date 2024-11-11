@@ -84,7 +84,7 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        api_key: str, top_k: int = 5) -> List[Dict]:
+                         api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings with updated relevance scoring"""
     query_embedding = get_embedding_cached(query_text, api_key)
     if not query_embedding:
@@ -242,8 +242,8 @@ def main():
                                     'content': result['content'],
                                     'source': result['source']
                                 }
-               
-                     # Convert to list and sort by similarity
+                   
+                    # Convert to list and sort by similarity
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
@@ -251,59 +251,42 @@ def main():
                         # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
-for i, speaker in enumerate(speakers, 1):
-    # Create a preview of the content for the collapsed state (first 200 characters)
-    preview_text = speaker['content'][:200] + "..." if len(speaker['content']) > 200 else speaker['content']
-    
-    # Display collapsed label with name, organization, and preview
-    collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
-    
-    with st.expander(collapsed_label, expanded=i<=3):  # Show the first 3 expanded by default
-        cols = st.columns([2, 1])
-        with cols[0]:
-            if speaker['source'] == 'arendalsuka':
-                st.write("**Deltaker i arrangement:**", speaker['context'])
-                if pd.notna(speaker['content']):
-                    st.write("**Arrangementsbeskrivelse:**")
-                    st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-            else:  # parliament hearings
-                st.write("**Innspill til høring:**", speaker['context'])
-                if pd.notna(speaker['content']):
-                    st.write("**Høringsinnspill:**")
-                    st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-            
-            st.write("**Kilde:**", "Arendalsuka" if speaker['source'] == "arendalsuka" else "Stortingshøringer")
-        with cols[1]:
-            st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
-            if speaker['source'] == 'arendalsuka':
-                st.markdown(f"[Gå til arrangement](arendalsuka.no)")
-            else:
-                st.markdown(f"[Gå til høring](stortinget.no)")
-
+                        for i, speaker in enumerate(speakers, 1):
+                            # Create a preview of the content for the collapsed state (first 200 characters)
+                            preview_text = speaker['content'][:200] + "..." if len(speaker['content']) > 200 else speaker['content']
+                            
+                            # Display collapsed label with name, organization, and preview
+                            collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
+                            
+                            with st.expander(collapsed_label, expanded=i<=3):  # Show the first 3 expanded by default
                                 cols = st.columns([2, 1])
                                 with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
                                         st.write("**Deltaker i arrangement:**", speaker['context'])
                                         if pd.notna(speaker['content']):
                                             st.write("**Arrangementsbeskrivelse:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+                                            st.markdown(
+                                                f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>",
+                                                unsafe_allow_html=True
+                                            )
                                     else:  # parliament hearings
                                         st.write("**Innspill til høring:**", speaker['context'])
                                         if pd.notna(speaker['content']):
                                             st.write("**Høringsinnspill:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+                                            st.markdown(
+                                                f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>",
+                                                unsafe_allow_html=True
+                                            )
                                     
-                                    st.write("**Kilde:**", 
-                                           "Arendalsuka" if speaker['source'] == "arendalsuka" 
-                                           else "Stortingshøringer")
+                                    st.write("**Kilde:**", "Arendalsuka" if speaker['source'] == "arendalsuka" else "Stortingshøringer")
                                 with cols[1]:
-                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
+                                    st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
                                     if speaker['source'] == 'arendalsuka':
                                         st.markdown(f"[Gå til arrangement](arendalsuka.no)")
                                     else:
                                         st.markdown(f"[Gå til høring](stortinget.no)")
                         
-                        # Add download button
+                        # Add download button outside the for loop
                         st.download_button(
                             "Last ned forslag som CSV",
                             pd.DataFrame(speakers).to_csv(index=False),
@@ -320,5 +303,3 @@ for i, speaker in enumerate(speakers, 1):
 
 if __name__ == "__main__":
     main()
-
-
