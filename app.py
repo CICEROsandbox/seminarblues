@@ -23,6 +23,18 @@ NORWEGIAN_STOP_WORDS = {
     'med', 'hverandre'
 }
 
+CLIMATE_KEYWORDS = {
+    'aksept', 'arealbruk', 'arktis', 'co2', 'utslipp', 'ekstremvær', 
+    'energiforbruk', 'energipolitikk', 'flom', 'klimapanel', 'forbruk',
+    'fornybar', 'energi', 'klima', 'helse', 'hetebølge', 'hydrogen',
+    'karbon', 'karbonfangst', 'klimabudsjett', 'klimafinans', 
+    'klimaforhandling', 'klimakommunikasjon', 'klimamodell', 'klimaomstilling',
+    'klimapolitikk', 'klimarisiko', 'klimatjeneste', 'luftforurensning',
+    'landbruk', 'metan', 'nedbør', 'olje', 'gass', 'atmosfære', 'omstilling',
+    'sirkulærøkonomi', 'skog', 'teknologi', 'temperatur', 'tilpasning',
+    'transport', 'utslipp', 'vindkraft', 'klimaendring'
+}
+
 # Configuration
 DATA_SOURCES = [
     {
@@ -84,11 +96,11 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         return None
 
 def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with normalized scoring and stop words filtering"""
+    """Calculate semantic similarity with emphasis on climate research relevance"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
-    # Calculate base cosine similarity (ranges from -1 to 1)
+    # Calculate base cosine similarity
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
     # Convert texts to lowercase for comparison
@@ -96,37 +108,66 @@ def calculate_similarity(query_embedding: List[float], doc_embedding: List[float
     doc_lower = doc_text.lower()
     
     # Calculate meaningful word overlap (excluding stop words)
-    query_words = {word for word in query_lower.split() if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
-    doc_words = {word for word in doc_lower.split() if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+    query_words = {word for word in query_lower.split() 
+                  if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+    doc_words = {word for word in doc_lower.split() 
+                if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+    
+    # Find matching words
     matching_words = query_words.intersection(doc_words)
     
-    # Calculate overlap ratio only for meaningful words
+    # Calculate climate keyword relevance
+    climate_words_doc = {word for word in doc_words if any(
+        climate_term in word for climate_term in CLIMATE_KEYWORDS
+    )}
+    climate_words_query = {word for word in query_words if any(
+        climate_term in word for climate_term in CLIMATE_KEYWORDS
+    )}
+    
+    # Calculate various relevance factors
     overlap_ratio = len(matching_words) / len(query_words) if query_words else 0
+    climate_relevance = len(climate_words_doc) / 10  # Normalize by expecting ~10 climate terms max
+    query_climate_focus = len(climate_words_query) / len(query_words) if query_words else 0
     
-    # Check for key terms in the first 100 words (expanded window)
+    # Check for key terms in the first 100 words
     first_words = ' '.join(doc_lower.split()[:100])
-    important_words_count = sum(1 for word in query_words if word in first_words)
-    early_match_ratio = important_words_count / len(query_words) if query_words else 0
+    first_words_set = set(first_words.split())
+    climate_words_early = {word for word in first_words_set if any(
+        climate_term in word for climate_term in CLIMATE_KEYWORDS
+    )}
+    early_climate_boost = len(climate_words_early) / 5  # Normalize by expecting ~5 early climate terms max
     
-    # Calculate final score with emphasis on semantic similarity
+    # Calculate final score with climate research emphasis
     final_score = (
-        0.80 * max(0, cos_sim) +      # Heavy emphasis on semantic similarity
-        0.15 * overlap_ratio +         # Some weight for meaningful word matches
-        0.05 * early_match_ratio       # Small boost for early matches
+        0.60 * max(0, cos_sim) +          # Base semantic similarity
+        0.15 * overlap_ratio +            # General word overlap
+        0.15 * climate_relevance +        # Climate term presence
+        0.10 * early_climate_boost        # Early climate terms bonus
     )
     
+    # Boost score if query is climate-focused
+    if query_climate_focus > 0:
+        final_score *= (1 + query_climate_focus * 0.2)  # Up to 20% boost for climate-focused queries
+    
     # Apply threshold adjustments
-    if final_score < 0.2:  # Very low relevance
+    if final_score < 0.2:
         final_score *= 0.5
-    elif final_score > 0.8:  # Very high relevance
-        final_score = 0.8 + (final_score - 0.8) * 0.5  # Scale down high scores
+    elif final_score > 0.8:
+        final_score = 0.8 + (final_score - 0.8) * 0.5
+    
+    # Include climate keywords in matching words display
+    matching_words.update(climate_words_doc.intersection(climate_words_query))
     
     return final_score, matching_words
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content with improved matching and per-source limits"""
-    query_embedding = get_embedding(query_text, api_key)
+    """Find similar content with climate research context"""
+    # Add climate research context to the query
+    climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
+    enhanced_query = climate_context + query_text
+    
+    query_embedding = get_embedding(enhanced_query, api_key)
     if not query_embedding:
         return []
     
