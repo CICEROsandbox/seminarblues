@@ -49,9 +49,8 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-@st.cache_data
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Cached version of get_embedding that doesn't use the client object"""
+    """Get the embedding for a given text."""
     try:
         client = OpenAI(api_key=api_key)
         response = client.embeddings.create(
@@ -62,9 +61,6 @@ def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
-
-# ... rest of your code ...
-
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
@@ -86,45 +82,34 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     progress_bar.empty()
     return embeddings
 
-def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+def find_similar_content(query_text: str, df: pd.DataFrame, embeddings: List[List[float]], 
                          api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content using pre-computed embeddings with updated relevance scoring"""
+    """Find similar content using pre-computed embeddings"""
     query_embedding = get_embedding_cached(query_text, api_key)
     if not query_embedding:
         return []
     
-    # Extract keywords from query to boost relevance
-    keywords = query_text.lower().split()
-    
     # Calculate similarities for all entries
     similarities = []
-    for i, emb in enumerate(cached_embeddings):
+    for i, emb in enumerate(embeddings):
         if emb:
             # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Apply log scaling to reduce clustering at the top
-            scaled_similarity = np.log1p(cos_sim) * 0.8
+            # Scale the similarity
+            scaled_similarity = cos_sim * 0.8  # Adjust scaling factor as needed
             
-            # Check for keyword match to boost similarity
-            entry_text = df.iloc[i]['combined_text'].lower()
-            keyword_overlap = sum(1 for kw in keywords if kw in entry_text)
-            boost_factor = 0.05 * keyword_overlap  # Adjust boost as needed
-            
-            # Cap the similarity score at 1.0 (100%) to avoid high percentages over 100%
-            final_similarity = min(scaled_similarity + boost_factor, 1.0)
-
-            similarities.append(final_similarity)
+            similarities.append(scaled_similarity)
         else:
             similarities.append(0)
     
-    # Create a dataframe with similarities
+    # Create a DataFrame with similarities
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
     })
     
-    # Filter out very low similarities
+    # Filter out low similarities
     similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
     
     # Get top_k most similar entries
@@ -220,7 +205,7 @@ def main():
             with st.spinner("Søker etter relevante deltakere..."):
                 # Filter by selected sources
                 source_mask = df['source'].isin(selected_sources)
-                filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices here
+                filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices
                 filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
                 
                 results = find_similar_content(
@@ -232,7 +217,7 @@ def main():
                 )
                 
                 if results:
-                    # Process speakers with better tracking of sources
+                    # Process speakers
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
@@ -245,8 +230,8 @@ def main():
                                     'content': result['content'],
                                     'source': result['source']
                                 }
-                   
-                    # Convert to list and sort by similarity
+                    
+                    # Convert to list and sort
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
@@ -255,33 +240,26 @@ def main():
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
                         for i, speaker in enumerate(speakers, 1):
-                            # Create a preview of the content for the collapsed state (first 200 characters)
-                            preview_text = speaker['content'][:200] + "..." if len(speaker['content']) > 200 else speaker['content']
-                            
-                            # Display collapsed label with name, organization, and preview
-                            collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
-                            
-                            with st.expander(collapsed_label, expanded=False):  # All results are collapsed by default
+                            with st.expander(
+                                f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.1f}% relevans", 
+                                expanded=False
+                            ):
                                 cols = st.columns([2, 1])
                                 with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
                                         st.write("**Deltaker i arrangement:**", speaker['context'])
                                         if pd.notna(speaker['content']):
                                             st.write("**Arrangementsbeskrivelse:**")
-                                            st.markdown(
-                                                f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>",
-                                                unsafe_allow_html=True
-                                            )
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
                                     else:  # parliament hearings
                                         st.write("**Innspill til høring:**", speaker['context'])
                                         if pd.notna(speaker['content']):
                                             st.write("**Høringsinnspill:**")
-                                            st.markdown(
-                                                f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>",
-                                                unsafe_allow_html=True
-                                            )
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
                                     
-                                    st.write("**Kilde:**", "Arendalsuka" if speaker['source'] == "arendalsuka" else "Stortingshøringer")
+                                    st.write("**Kilde:**", 
+                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
+                                            else "Stortingshøringer")
                                 with cols[1]:
                                     st.metric("Relevans", f"{speaker['similarity'] * 100:.1f}%")
                                     if speaker['source'] == 'arendalsuka':
@@ -289,7 +267,7 @@ def main():
                                     else:
                                         st.markdown(f"[Gå til høring](stortinget.no)")
                         
-                        # Add download button outside the for loop
+                        # Add download button
                         st.download_button(
                             "Last ned forslag som CSV",
                             pd.DataFrame(speakers).to_csv(index=False),
