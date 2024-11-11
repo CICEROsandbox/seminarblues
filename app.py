@@ -237,24 +237,12 @@ def main():
                 )
                 
                 if results:
-                    # Process speakers
+                    # Process speakers with better tracking of sources
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
-                            if speaker not in speakers_dict or result['similarity'] > speakers_dict[speaker]['similarity']:
-                                speakers_dict[speaker] = {
-                                    'similarity': result['similarity'],
-                                    'context': result['context'],
-                                    'content': result['content'],
-                                    'source': result['source']
-                                }
-                    
-                    speakers = [
-                        {'name': name, **info}
-                        for name, info in speakers_dict.items()
-                        if info['similarity'] >= min_similarity
-                    ]
-                    speakers.sort(key=lambda x: x['similarity'], reverse=True)
+                            speaker_key = f"{speaker}_{result['original_index']}" 
+                            
                     # Find this section in the main() function, around line 250-300:
 
                     if speakers:
