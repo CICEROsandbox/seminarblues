@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from openai import OpenAI
 from scipy.spatial.distance import cosine
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 import time
 
 # Configuration
@@ -66,10 +66,10 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> float:
-    """Calculate semantic similarity with improved topic filtering"""
+def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> Tuple[float, Set[str]]:
+    """Calculate semantic similarity with improved relevance scoring"""
     if not query_embedding or not doc_embedding:
-        return 0.0
+        return 0.0, set()
     
     # Calculate base cosine similarity
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
@@ -78,28 +78,39 @@ def calculate_similarity(query_embedding: List[float], doc_embedding: List[float
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Calculate text-based relevance score
-    def get_word_overlap_score(text1: str, text2: str) -> float:
-        words1 = set(text1.split())
-        words2 = set(text2.split())
-        overlap = words1.intersection(words2)
-        union = words1.union(words2)
-        return len(overlap) / len(union) if union else 0
-
-    overlap_score = get_word_overlap_score(query_lower, doc_lower)
+    # Calculate direct word overlap
+    query_words = set(query_lower.split())
+    doc_words = set(doc_lower.split())
+    matching_words = query_words.intersection(doc_words)
+    direct_overlap = len(matching_words)
     
-    # Adjust similarity based on text overlap
-    adjusted_sim = cos_sim * (0.7 + 0.3 * overlap_score)
+    # Calculate key term presence in title/beginning
+    first_words = ' '.join(doc_lower.split()[:20])
+    query_in_start = any(word in first_words for word in query_words)
     
-    # Apply more aggressive scaling
-    if adjusted_sim < 0.4:  # Clear non-matches
-        final_sim = adjusted_sim * 0.1  # Heavy penalty
-    elif adjusted_sim < 0.6:  # Weak matches
-        final_sim = 0.04 + (adjusted_sim - 0.4) * 0.4
-    else:  # Strong matches
-        final_sim = 0.12 + (adjusted_sim - 0.6) * 1.5
+    # Base score from embeddings
+    base_score = cos_sim
     
-    return final_sim
+    # Apply adjustments
+    if direct_overlap > 0:
+        base_score *= (1.0 + (direct_overlap * 0.2))  # Boost for matching words
+    
+    if query_in_start:
+        base_score *= 1.3  # Boost for early matches
+    
+    # Final scaling with aggressive differentiation
+    if base_score < 0.5:
+        final_score = base_score * 0.1  # Heavily penalize low relevance
+    elif base_score < 0.7:
+        final_score = 0.05 + (base_score - 0.5) * 0.5  # Moderate scaling
+    else:
+        final_score = 0.15 + (base_score - 0.7) * 2.0  # Reward high relevance
+    
+    # Additional penalty for no direct relevance
+    if direct_overlap == 0 and not query_in_start:
+        final_score *= 0.5
+    
+    return final_score, matching_words
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
@@ -140,8 +151,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Calculate similarity with both embedding and text comparison
-            similarity = calculate_similarity(
+            similarity, matching_words = calculate_similarity(
                 query_embedding, 
                 emb,
                 query_text,
@@ -152,20 +162,23 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             texts_for_debug.append((
                 df.iloc[i]['combined_text'][:200],
                 similarity,
-                df.iloc[i]['source']
+                df.iloc[i]['source'],
+                matching_words
             ))
         else:
             similarities.append(0)
     
-    # Debug information
+    # Enhanced debug information
     with st.expander("Search Analysis", expanded=True):
         st.write(f"Query: '{query_text}'")
         st.write("Top matches:")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:5]
-        for text, sim, source in sorted_debug:
+        for text, sim, source, matching_words in sorted_debug:
             st.write("\n---")
             st.write(f"Source: {source}")
             st.write(f"Score: {sim:.3f}")
+            if matching_words:
+                st.write(f"Matching words: {', '.join(matching_words)}")
             st.write(f"Text: {text}")
     
     # Filter and rank results
@@ -215,10 +228,10 @@ def main():
     
     # Add topic guidance
     st.info("""
-    💡 Tips for better results:
-    - Be specific about the topic
-    - Include key terms and concepts
-    - Mention the purpose or goal of the seminar
+    💡 Tips for bedre resultater:
+    - Vær spesifikk om temaet
+    - Inkluder nøkkelord og konsepter
+    - Beskriv formålet med seminaret
     """)
 
     # Check for API key
@@ -252,7 +265,7 @@ def main():
         query = st.text_area(
             "Beskriv seminar-temaet:",
             height=100,
-            placeholder="Eksempel: Et seminar om karbonfangst og lagring i Norge, med fokus på politiske rammeverk og industrisamarbeid."
+            placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
         )
     
     with col2:
@@ -267,7 +280,7 @@ def main():
             "Minimum relevans (0-1):",
             min_value=0.0,
             max_value=1.0,
-            value=0.15,  # Adjusted default
+            value=0.15,
             step=0.05
         )
     
@@ -349,6 +362,7 @@ def main():
                             "text/csv",
                             key='download-csv'
                         )
+                    else:
                     else:
                         st.warning("Ingen deltakere møtte minimumskravet for relevans. Prøv å justere filteret.")
                 else:
