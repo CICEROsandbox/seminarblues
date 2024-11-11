@@ -255,7 +255,8 @@ def main():
                         if info['similarity'] >= min_similarity
                     ]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
-                    
+                    # Find this section in the main() function, around line 250-300:
+
                     if speakers:
                         # Get GPT analysis for categorization
                         with st.spinner("Kategoriserer deltakere..."):
@@ -268,6 +269,7 @@ def main():
                         # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
+                        # REPLACE THIS ENTIRE FOR-LOOP SECTION:
                         for i, speaker in enumerate(speakers, 1):
                             with st.expander(
                                 f"🎤 {speaker['name']} - {speaker['similarity']:.0%} relevans", 
@@ -278,13 +280,13 @@ def main():
                                     if speaker['source'] == 'arendalsuka':
                                         st.write("**Deltaker i arrangement:**", speaker['context'])
                                         if pd.notna(speaker['content']):
-                                            with st.expander("Se arrangementsbeskrivelse"):
-                                                st.write(speaker['content'])
+                                            st.write("**Arrangementsbeskrivelse:**")
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
                                     else:  # parliament hearings
                                         st.write("**Innspill til høring:**", speaker['context'])
                                         if pd.notna(speaker['content']):
-                                            with st.expander("Se høringsinnspill"):
-                                                st.write(speaker['content'])
+                                            st.write("**Høringsinnspill:**")
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
                                     
                                     st.write("**Kilde:**", 
                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
@@ -295,7 +297,7 @@ def main():
                                         st.markdown(f"[Gå til arrangement](arendalsuka.no)")  # Add actual URL pattern
                                     else:
                                         st.markdown(f"[Gå til høring](stortinget.no)")  # Add actual URL pattern
-                        
+
                         # Add download button
                         st.download_button(
                             "Last ned forslag som CSV",
