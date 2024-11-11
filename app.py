@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
+import openai
 import numpy as np
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
