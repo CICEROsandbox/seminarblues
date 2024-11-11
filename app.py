@@ -100,6 +100,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     if not query_embedding:
         return []
     
+    # Calculate similarities for all entries
     similarities = []
     for emb in cached_embeddings:
         if emb:
@@ -108,13 +109,21 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         else:
             similarities.append(0)
     
-    top_indices = np.argsort(similarities)[-top_k:][::-1]
+    # Create a dataframe with similarities for better handling
+    similarity_df = pd.DataFrame({
+        'index': range(len(similarities)),
+        'similarity': similarities
+    })
+    
+    # Get top_k most similar entries
+    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
     for idx in top_indices:
         entry = df.iloc[idx]
         source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
         
+        # Get speaker/organization info
         speakers = []
         if pd.notna(entry[source_config["speaker_column"]]):
             if '\n' in str(entry[source_config["speaker_column"]]):
@@ -122,13 +131,14 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             else:
                 speakers = [entry[source_config["speaker_column"]].strip()]
         
+        # Add result with full context
         results.append({
+            'index': idx,  # Store the original index
             'speakers': speakers,
             'similarity': similarities[idx],
             'source': entry['source'],
             'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
             'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
-            'combined_text': entry['combined_text']
         })
     
     return results
@@ -236,10 +246,24 @@ def main():
                     top_k=num_suggestions
                 )
                 
-                if results:
+if results:
                     # Process speakers with better tracking of sources
                     speakers_dict = {}
                     for result in results:
+                        for speaker in result['speakers']:
+                            speaker_key = f"{speaker}_{result['index']}"  # Using 'index' instead of 'original_index'
+                            if speaker_key not in speakers_dict or result['similarity'] > speakers_dict[speaker_key]['similarity']:
+                                speakers_dict[speaker_key] = {
+                                    'name': speaker,
+                                    'similarity': result['similarity'],
+                                    'context': result['context'],
+                                    'content': result['content'],
+                                    'source': result['source']
+                                }
+                    
+                    # Convert to list and sort
+                    speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
+                    speakers.sort(key=lambda x: x['similarity'], reverse=True)
                         for speaker in result['speakers']:
                             speaker_key = f"{speaker}_{result['original_index']}" 
                             
