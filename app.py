@@ -60,8 +60,34 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-def get_embedding(text, client):
-    """Get embeddings for a text using OpenAI"""
+@st.cache_data
+def get_embeddings_for_dataset(texts: List[str], client: OpenAI) -> List[Optional[List[float]]]:
+    """Get embeddings for all texts in dataset, with caching"""
+    embeddings = []
+    total = len(texts)
+    progress_text = "Calculating embeddings..."
+    progress_bar = st.progress(0, text=progress_text)
+    
+    for i, text in enumerate(texts):
+        try:
+            response = client.embeddings.create(
+                input=text,
+                model="text-embedding-ada-002"
+            )
+            embeddings.append(response.data[0].embedding)
+        except Exception as e:
+            st.error(f"Error getting embedding: {str(e)}")
+            embeddings.append(None)
+        
+        # Update progress
+        progress = (i + 1) / total
+        progress_bar.progress(progress, text=f"{progress_text} ({i+1}/{total})")
+    
+    progress_bar.empty()
+    return embeddings
+
+def get_embedding(text: str, client: OpenAI) -> Optional[List[float]]:
+    """Get embedding for a single text"""
     try:
         response = client.embeddings.create(
             input=text,
@@ -72,23 +98,21 @@ def get_embedding(text, client):
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def find_similar_content(query_text, df, client, top_k=5):
-    """Find similar content and extract speakers"""
+def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+                        client: OpenAI, top_k: int = 5) -> List[Dict]:
+    """Find similar content using pre-computed embeddings"""
     query_embedding = get_embedding(query_text, client)
     if not query_embedding:
         return []
     
-    # Calculate similarities
-    embeddings = [get_embedding(text, client) for text in df['combined_text']]
     similarities = []
-    for emb in embeddings:
-        if emb:  # Check if embedding was successfully created
+    for emb in cached_embeddings:
+        if emb:
             similarity = 1 - cosine(query_embedding, emb)
             similarities.append(similarity)
         else:
-            similarities.append(0)  # No similarity if embedding failed
+            similarities.append(0)
     
-    # Get top similar entries
     top_indices = np.argsort(similarities)[-top_k:][::-1]
     
     results = []
@@ -96,7 +120,6 @@ def find_similar_content(query_text, df, client, top_k=5):
         entry = df.iloc[idx]
         source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
         
-        # Get speaker/organization info
         speakers = []
         if pd.notna(entry[source_config["speaker_column"]]):
             if '\n' in str(entry[source_config["speaker_column"]]):
@@ -104,7 +127,6 @@ def find_similar_content(query_text, df, client, top_k=5):
             else:
                 speakers = [entry[source_config["speaker_column"]].strip()]
         
-        # Add result
         results.append({
             'speakers': speakers,
             'similarity': similarities[idx],
@@ -115,8 +137,8 @@ def find_similar_content(query_text, df, client, top_k=5):
     
     return results
 
-def get_gpt_analysis(query: str, speakers: List[Dict], client: OpenAI) -> str:
-    """Get GPT analysis of the suggestions based on the seminar topic"""
+def get_gpt_analysis(query: str, speakers: List[Dict], client: OpenAI) -> Optional[str]:
+    """Get GPT analysis of the suggestions"""
     try:
         context = f"""
 Seminartema: {query}
@@ -167,6 +189,10 @@ def main():
         
     df = pd.concat(all_data, ignore_index=True)
     
+    # Pre-compute embeddings for all texts (cached)
+    with st.spinner("Forbereder søkefunksjonalitet..."):
+        cached_embeddings = get_embeddings_for_dataset(df['combined_text'].tolist(), client)
+    
     # Create three columns for input and filters
     col1, col2, col3 = st.columns([2, 1, 1])
     
@@ -205,8 +231,17 @@ def main():
         if query:
             with st.spinner("Søker etter relevante deltakere..."):
                 # Filter by selected sources
-                filtered_df = df[df['source'].isin(selected_sources)]
-                results = find_similar_content(query, filtered_df, client, top_k=num_suggestions)
+                source_mask = df['source'].isin(selected_sources)
+                filtered_df = df[source_mask]
+                filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
+                
+                results = find_similar_content(
+                    query, 
+                    filtered_df, 
+                    filtered_embeddings,
+                    client, 
+                    top_k=num_suggestions
+                )
                 
                 if results:
                     # Process speakers
