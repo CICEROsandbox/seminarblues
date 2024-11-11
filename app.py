@@ -8,11 +8,7 @@ from typing import Dict, List, Optional
 # System instructions for GPT
 SYSTEM_INSTRUCTIONS = """
 Du er en rådgiver som skal hjelpe med å kategorisere potensielle deltakere til seminarer.
-Din oppgave er å:
-1. Gruppere deltakerne etter type (f.eks. forskere, politikere, organisasjoner, næringsliv, etc.)
-2. Liste opp gruppene på en oversiktlig måte
-
-Bruk en kort og presis tone. Fokuser kun på å kategorisere deltakerne i relevante grupper.
+Bruk en kort og presis tone. 
 """
 
 # Configuration
