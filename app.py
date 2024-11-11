@@ -61,23 +61,31 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         return None
 
 @st.cache_data
-def get_embeddings_for_dataset(texts: List[str], client: OpenAI) -> List[Optional[List[float]]]:
-    """Get embeddings for all texts in dataset, with caching"""
+def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
+    """Cached version of get_embedding that doesn't use the client object"""
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.embeddings.create(
+            input=_text,
+            model="text-embedding-ada-002"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        st.error(f"Error getting embedding: {str(e)}")
+        return None
+
+@st.cache_data
+def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
+    """Process all texts and get their embeddings with caching"""
     embeddings = []
     total = len(texts)
+    
     progress_text = "Calculating embeddings..."
     progress_bar = st.progress(0, text=progress_text)
     
     for i, text in enumerate(texts):
-        try:
-            response = client.embeddings.create(
-                input=text,
-                model="text-embedding-ada-002"
-            )
-            embeddings.append(response.data[0].embedding)
-        except Exception as e:
-            st.error(f"Error getting embedding: {str(e)}")
-            embeddings.append(None)
+        emb = get_embedding_cached(text, api_key)
+        embeddings.append(emb)
         
         # Update progress
         progress = (i + 1) / total
@@ -86,22 +94,10 @@ def get_embeddings_for_dataset(texts: List[str], client: OpenAI) -> List[Optiona
     progress_bar.empty()
     return embeddings
 
-def get_embedding(text: str, client: OpenAI) -> Optional[List[float]]:
-    """Get embedding for a single text"""
-    try:
-        response = client.embeddings.create(
-            input=text,
-            model="text-embedding-ada-002"
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        st.error(f"Error getting embedding: {str(e)}")
-        return None
-
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        client: OpenAI, top_k: int = 5) -> List[Dict]:
+                        api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings"""
-    query_embedding = get_embedding(query_text, client)
+    query_embedding = get_embedding_cached(query_text, api_key)
     if not query_embedding:
         return []
     
@@ -137,9 +133,10 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     return results
 
-def get_gpt_analysis(query: str, speakers: List[Dict], client: OpenAI) -> Optional[str]:
+def get_gpt_analysis(query: str, speakers: List[Dict], api_key: str) -> Optional[str]:
     """Get GPT analysis of the suggestions"""
     try:
+        client = OpenAI(api_key=api_key)
         context = f"""
 Seminartema: {query}
 
@@ -168,12 +165,8 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-    # Initialize OpenAI client
-    try:
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    except Exception as e:
-        st.error(f"Error initializing OpenAI client: {str(e)}")
-        return
+    # Get API key from secrets
+    api_key = st.secrets["OPENAI_API_KEY"]
 
     # Load data from all sources
     all_data = []
@@ -191,7 +184,7 @@ def main():
     
     # Pre-compute embeddings for all texts (cached)
     with st.spinner("Forbereder søkefunksjonalitet..."):
-        cached_embeddings = get_embeddings_for_dataset(df['combined_text'].tolist(), client)
+        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create three columns for input and filters
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -239,7 +232,7 @@ def main():
                     query, 
                     filtered_df, 
                     filtered_embeddings,
-                    client, 
+                    api_key, 
                     top_k=num_suggestions
                 )
                 
@@ -265,7 +258,7 @@ def main():
                     if speakers:
                         # Get GPT analysis
                         with st.spinner("Analyserer forslag..."):
-                            analysis = get_gpt_analysis(query, speakers, client)
+                            analysis = get_gpt_analysis(query, speakers, api_key)
                             if analysis:
                                 st.subheader("💡 Analyse og anbefalinger")
                                 st.write(analysis)
