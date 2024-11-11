@@ -7,6 +7,7 @@ import os
 from typing import Dict, List, Optional
 
 # Define data source configurations as dictionaries
+# Update the parliament source configuration in DATA_SOURCES
 DATA_SOURCES = [
     {
         "name": "arendalsuka",
@@ -17,12 +18,12 @@ DATA_SOURCES = [
         "event_column": 'title'
     },
     {
-        "name": "parliament",
-        "file_path": "data/parliament_hearings.csv",
-        "text_columns": ['hearing_title', 'description'],
-        "speaker_column": 'participants',
-        "date_column": 'hearing_date',
-        "event_column": 'hearing_title'
+        "name": "parliament_hearings",
+        "file_path": "data/Stortinget-horinger.csv",
+        "text_columns": ['Høringssak', 'Innhold - høring'],  # Combining hearing title and content
+        "speaker_column": 'Innsender',  # Organization/person submitting the response
+        "event_column": 'Høringssak',
+        "separator": ";",  # Specify semicolon separator for this source
     }
 ]
 
@@ -30,7 +31,12 @@ DATA_SOURCES = [
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source"""
     try:
-        df = pd.read_csv(source_config["file_path"])
+        # Use specified separator if provided, otherwise default to comma
+        separator = source_config.get("separator", ",")
+        df = pd.read_csv(source_config["file_path"], sep=separator)
+        
+        # Remove any empty rows (as seen in the example)
+        df = df.dropna(how='all')
         
         # Combine specified text columns for embedding
         df['combined_text'] = ''
