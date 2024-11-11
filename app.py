@@ -49,8 +49,7 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-@st.cache_data
-@st.cache_data
+@st.cache_data(ttl=0)
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text"""
     try:
@@ -64,88 +63,9 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-# Remove caching for the similarity calculation
-def calculate_similarity(query_embedding: List[float], doc_embedding: List[float]) -> float:
-    """Calculate semantic similarity with proper scaling"""
-    if not query_embedding or not doc_embedding:
-        return 0.0
-    
-    # Calculate base similarity
-    cos_sim = 1 - cosine(query_embedding, doc_embedding)
-    
-    # Apply non-linear scaling to better differentiate relevance levels
-    if cos_sim < 0.5:
-        return cos_sim * 0.2  # Very low relevance
-    elif cos_sim < 0.7:
-        return 0.1 + (cos_sim - 0.5) * 0.6  # Medium relevance
-    else:
-        return 0.22 + (cos_sim - 0.7) * 1.2  # High relevance
-
-def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content without caching similarity calculations"""
-    query_embedding = get_embedding(query_text, _api_key)
-    if not query_embedding:
-        return []
-    
-    # Calculate similarities fresh each time
-    similarities = []
-    texts_for_debug = []
-    
-    for i, emb in enumerate(cached_embeddings):
-        if emb:
-            similarity = calculate_similarity(query_embedding, emb)
-            similarities.append(similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], similarity))
-        else:
-            similarities.append(0)
-    
-    # Debug information
-    with st.expander("Search Debug", expanded=True):
-        st.write(f"Query: '{query_text}'")
-        st.write("Top matches:")
-        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
-        for text, sim in sorted_debug:
-            st.write(f"\nScore: {sim:.3f}")
-            st.write(f"Text: {text}")
-            st.write("---")
-    
-    # Create DataFrame for filtering
-    similarity_df = pd.DataFrame({
-        'index': range(len(similarities)),
-        'similarity': similarities
-    })
-    
-    # Filter low relevance results
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
-    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
-    
-    results = []
-    for idx in top_indices:
-        entry = df.iloc[idx]
-        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
-        
-        speakers = []
-        if pd.notna(entry[source_config["speaker_column"]]):
-            if '\n' in str(entry[source_config["speaker_column"]]):
-                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
-            else:
-                speakers = [entry[source_config["speaker_column"]].strip()]
-        
-        results.append({
-            'index': idx,
-            'speakers': speakers,
-            'similarity': float(similarities[idx]),
-            'source': entry['source'],
-            'context': entry.get(source_config["event_column"], ''),
-            'content': entry.get(source_config["content_column"], ''),
-        })
-    
-    return results
-
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Cache only the initial embeddings, not the similarity calculations"""
+    """Process texts with semantic context"""
     embeddings = []
     total = len(texts)
     
@@ -164,42 +84,46 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find semantically similar content"""
+    """Find similar content with general semantic matching"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
     
-    # Calculate semantic similarities
+    # Calculate similarities
     similarities = []
     texts_for_debug = []
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Basic cosine similarity
+            # Calculate cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Scale similarity based on semantic relevance thresholds
-            # These thresholds are calibrated for semantic matching
-            if cos_sim < 0.75:  # Low semantic relevance
-                scaled_similarity = cos_sim * 0.4  # Significant penalty for low relevance
-            elif cos_sim < 0.85:  # Moderate semantic relevance
-                scaled_similarity = 0.3 + (cos_sim - 0.75) * 2  # More gradual scaling
-            else:  # High semantic relevance
-                scaled_similarity = 0.5 + (cos_sim - 0.85) * 3  # Reward high relevance
+            # Apply scaling that works for any topic
+            if cos_sim < 0.5:  # Clear non-matches
+                scaled_similarity = cos_sim * 0.2
+            elif cos_sim < 0.7:  # Partial matches
+                scaled_similarity = 0.1 + (cos_sim - 0.5)
+            else:  # Good matches
+                scaled_similarity = 0.3 + (cos_sim - 0.7) * 2
             
             similarities.append(scaled_similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], cos_sim, scaled_similarity))
+            texts_for_debug.append((
+                df.iloc[i]['combined_text'][:200],
+                cos_sim,
+                scaled_similarity
+            ))
         else:
             similarities.append(0)
     
     # Debug information
-    with st.expander("Semantic Analysis Debug", expanded=False):
-        st.write(f"Search query: '{query_text}'")
-        st.write("Top matches with semantic relevance:")
+    with st.expander("Search Analysis", expanded=True):
+        st.write(f"Query: '{query_text}'")
+        st.write("Top matches:")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:3]
         for text, raw_sim, scaled_sim in sorted_debug:
-            st.write(f"\nRelevance score: {scaled_sim:.2f}")
-            st.write(f"Content: {text}")
+            st.write(f"\nRaw similarity: {raw_sim:.3f}")
+            st.write(f"Adjusted score: {scaled_sim:.3f}")
+            st.write(f"Text: {text}")
             st.write("---")
     
     # Filter and rank results
@@ -208,8 +132,8 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         'similarity': similarities
     })
     
-    # Higher threshold for semantic relevance
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.35]
+    # Filter low relevance matches
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.3]
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
@@ -240,6 +164,11 @@ def main():
     
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
+    
+    # Add cache clear button
+    if st.button("Clear Cache"):
+        st.cache_data.clear()
+        st.rerun()
 
     # Initialize OpenAI client
     if "OPENAI_API_KEY" not in st.secrets:
@@ -262,11 +191,9 @@ def main():
         
     df = pd.concat(all_data, ignore_index=True)
     
-    # Pre-compute embeddings with semantic context
+    # Pre-compute embeddings
     with st.spinner("Analyserer innhold..."):
         cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
-    
-    # Rest of your main function remains the same...
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
