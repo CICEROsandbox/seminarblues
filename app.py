@@ -67,48 +67,41 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         return None
 
 def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], query_text: str, doc_text: str) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with improved relevance scoring"""
+    """Calculate semantic similarity with normalized scoring"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
-    # Calculate base cosine similarity
+    # Calculate base cosine similarity (ranges from -1 to 1)
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
     # Convert texts to lowercase for comparison
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Calculate direct word overlap
+    # Calculate word overlap ratio
     query_words = set(query_lower.split())
     doc_words = set(doc_lower.split())
     matching_words = query_words.intersection(doc_words)
-    direct_overlap = len(matching_words)
+    overlap_ratio = len(matching_words) / len(query_words) if query_words else 0
     
-    # Calculate key term presence in title/beginning
-    first_words = ' '.join(doc_lower.split()[:20])
-    query_in_start = any(word in first_words for word in query_words)
+    # Check for key terms in the first 50 words
+    first_words = ' '.join(doc_lower.split()[:50])
+    important_words_count = sum(1 for word in query_words if word in first_words)
+    early_match_ratio = important_words_count / len(query_words) if query_words else 0
     
-    # Base score from embeddings
-    base_score = cos_sim
+    # Calculate final score with weighted components
+    # Base similarity (50%), word overlap (30%), early matches (20%)
+    final_score = (
+        0.50 * max(0, cos_sim) +  # Ensure non-negative
+        0.30 * overlap_ratio +
+        0.20 * early_match_ratio
+    )
     
-    # Apply adjustments
-    if direct_overlap > 0:
-        base_score *= (1.0 + (direct_overlap * 0.2))  # Boost for matching words
-    
-    if query_in_start:
-        base_score *= 1.3  # Boost for early matches
-    
-    # Final scaling with aggressive differentiation
-    if base_score < 0.5:
-        final_score = base_score * 0.1  # Heavily penalize low relevance
-    elif base_score < 0.7:
-        final_score = 0.05 + (base_score - 0.5) * 0.5  # Moderate scaling
-    else:
-        final_score = 0.15 + (base_score - 0.7) * 2.0  # Reward high relevance
-    
-    # Additional penalty for no direct relevance
-    if direct_overlap == 0 and not query_in_start:
+    # Apply threshold adjustments
+    if final_score < 0.2:  # Very low relevance
         final_score *= 0.5
+    elif final_score > 0.8:  # Very high relevance
+        final_score = 0.8 + (final_score - 0.8) * 0.5  # Scale down high scores
     
     return final_score, matching_words
 
@@ -139,9 +132,9 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content with improved matching"""
-    query_embedding = get_embedding(query_text, _api_key)
+                        api_key: str, top_k: int = 5) -> List[Dict]:
+    """Find similar content with improved matching and per-source limits"""
+    query_embedding = get_embedding(query_text, api_key)
     if not query_embedding:
         return []
     
@@ -158,7 +151,13 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 df.iloc[i]['combined_text']
             )
             
-            similarities.append(similarity)
+            similarities.append({
+                'index': i,
+                'score': similarity,
+                'source': df.iloc[i]['source'],
+                'matching_words': matching_words
+            })
+            
             texts_for_debug.append((
                 df.iloc[i]['combined_text'][:200],
                 similarity,
@@ -166,7 +165,12 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 matching_words
             ))
         else:
-            similarities.append(0)
+            similarities.append({
+                'index': i,
+                'score': 0,
+                'source': df.iloc[i]['source'],
+                'matching_words': set()
+            })
     
     # Enhanced debug information
     with st.expander("Search Analysis", expanded=False):
@@ -181,39 +185,53 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 st.write(f"Matching words: {', '.join(matching_words)}")
             st.write(f"Text: {text}")
     
-    # Filter and rank results
-    similarity_df = pd.DataFrame({
-        'index': range(len(similarities)),
-        'similarity': similarities
-    })
+    # Filter and group results by source
+    max_per_source = min(3, top_k)  # Maximum results per source
+    results_by_source = {}
     
-    # Filter low relevance matches
-    min_threshold = 0.15
-    similarity_df = similarity_df[similarity_df['similarity'] > min_threshold]
-    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
+    # Sort similarities by score
+    sorted_similarities = sorted(
+        [s for s in similarities if isinstance(s, dict) and s['score'] > 0.2],  # Minimum threshold
+        key=lambda x: x['score'],
+        reverse=True
+    )
     
+    # Group by source while respecting max_per_source
+    for sim in sorted_similarities:
+        source = sim['source']
+        if source not in results_by_source:
+            results_by_source[source] = []
+        if len(results_by_source[source]) < max_per_source:
+            results_by_source[source].append(sim)
+    
+    # Prepare final results
     results = []
-    for idx in top_indices:
-        entry = df.iloc[idx]
-        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
-        
-        speakers = []
-        if pd.notna(entry[source_config["speaker_column"]]):
-            if '\n' in str(entry[source_config["speaker_column"]]):
-                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
-            else:
-                speakers = [entry[source_config["speaker_column"]].strip()]
-        
-        results.append({
-            'index': idx,
-            'speakers': speakers,
-            'similarity': float(similarities[idx]),
-            'source': entry['source'],
-            'context': entry.get(source_config["event_column"], ''),
-            'content': entry.get(source_config["content_column"], ''),
-        })
+    for source_results in results_by_source.values():
+        for sim in source_results:
+            idx = sim['index']
+            entry = df.iloc[idx]
+            source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
+            
+            # Process speakers
+            speakers = []
+            if pd.notna(entry[source_config["speaker_column"]]):
+                if '\n' in str(entry[source_config["speaker_column"]]):
+                    speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
+                else:
+                    speakers = [entry[source_config["speaker_column"]].strip()]
+            
+            results.append({
+                'index': idx,
+                'speakers': speakers,
+                'similarity': float(sim['score']),
+                'source': entry['source'],
+                'context': entry.get(source_config["event_column"], ''),
+                'content': entry.get(source_config["content_column"], ''),
+                'matching_words': list(sim['matching_words'])
+            })
     
-    return results
+    # Limit total results while maintaining source balance
+    return sorted(results, key=lambda x: x['similarity'], reverse=True)[:top_k]
 
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
@@ -276,13 +294,13 @@ def main():
             value=5
         )
         
-        min_similarity = st.slider(
-            "Minimum relevans (0-1):",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.15,
-            step=0.05
-        )
+min_similarity = st.slider(
+    "Minimum relevans (0-1):",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.35,  # Increased from 0.15
+    step=0.05
+)
     
     with col3:
         selected_sources = st.multiselect(
