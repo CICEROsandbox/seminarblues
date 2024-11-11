@@ -264,9 +264,9 @@ if results:
                     # Convert to list and sort
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
-    
-                        for speaker in result['speakers']:
-                            speaker_key = f"{speaker}_{result['original_index']}" 
+  
+                     for speaker in result['speakers']:
+                     speaker_key = f"{speaker}_{result['original_index']}" 
                             
                     # Find this section in the main() function, around line 250-300:
 
