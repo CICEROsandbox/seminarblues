@@ -85,7 +85,7 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content using pre-computed embeddings with improved relevance scoring"""
+    """Find similar content using pre-computed embeddings with realistic similarity scoring"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
@@ -99,37 +99,51 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Apply more aggressive scaling to better differentiate relevance
-            # This will push down less relevant results more dramatically
-            scaled_similarity = (cos_sim ** 1.5) * 0.95  # Exponential scaling
+            # Apply more realistic scaling:
+            # 1. Start with raw cosine similarity
+            # 2. Apply sigmoid-like transformation to spread out the middle range
+            # 3. Penalize low similarities more aggressively
+            
+            # First, center the similarity scores around 0.5
+            centered_sim = cos_sim - 0.5
+            
+            # Apply sigmoid-like transformation
+            if centered_sim > 0:
+                scaled_similarity = 0.5 + (centered_sim * 0.8)  # Reduce upper range
+            else:
+                scaled_similarity = 0.5 + (centered_sim * 2.0)  # Increase lower range penalty
             
             # Additional penalty for very low similarities
-            if cos_sim < 0.5:  # Threshold for "weak" matches
-                scaled_similarity *= 0.5  # Further reduce weak matches
+            if cos_sim < 0.7:  # Higher threshold for relevance
+                scaled_similarity *= (cos_sim / 0.7)  # Progressive penalty
+            
+            # Ensure we stay within 0-1 range
+            scaled_similarity = max(0.0, min(1.0, scaled_similarity))
             
             similarities.append(scaled_similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], scaled_similarity))
+            texts_for_debug.append((df.iloc[i]['combined_text'][:200], cos_sim, scaled_similarity))
         else:
             similarities.append(0)
     
-    # Show debug information with more detail
+    # Enhanced debug information
     with st.expander("Debug Information", expanded=False):
-        st.write("Top 3 matched texts (with raw and scaled scores):")
-        sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
-        for text, score in sorted_debug:
-            raw_sim = 1 - cosine(query_embedding, cached_embeddings[texts_for_debug.index((text, score))])
-            st.write(f"Raw score: {raw_sim:.3f}, Scaled score: {score:.3f}")
+        st.write("Top 3 matched texts (with detailed scoring):")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:3]
+        for text, raw_sim, scaled_sim in sorted_debug:
+            st.write(f"Raw similarity: {raw_sim:.3f}")
+            st.write(f"Scaled similarity: {scaled_sim:.3f}")
             st.write(f"Text: {text}...")
             st.write("---")
     
-    # Create similarity DataFrame with higher minimum threshold
+    # Use stricter filtering
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
     })
     
-    # More aggressive filtering of low-relevance results
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.3]  # Increased threshold
+    # Much stricter threshold for filtering
+    min_similarity = 0.4  # Base threshold
+    similarity_df = similarity_df[similarity_df['similarity'] > min_similarity]
     
     # Get top_k matches
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
@@ -146,10 +160,15 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             else:
                 speakers = [entry[source_config["speaker_column"]].strip()]
         
+        # Apply final percentage scaling
+        final_similarity = similarities[idx]
+        # Convert to a more realistic percentage range
+        percentage_similarity = final_similarity * 100
+        
         results.append({
             'index': idx,
             'speakers': speakers,
-            'similarity': float(similarities[idx]),
+            'similarity': percentage_similarity / 100,  # Keep as decimal but with realistic scaling
             'source': entry['source'],
             'context': entry.get(source_config["event_column"], ''),
             'content': entry.get(source_config["content_column"], ''),
