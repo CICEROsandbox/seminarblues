@@ -68,23 +68,37 @@ def are_words_related(word1: str, word2: str) -> Tuple[bool, float]:
     norm1 = normalize_norwegian_word(word1)
     norm2 = normalize_norwegian_word(word2)
     
+    # Exact match after normalization
     if norm1 == norm2:
         return True, 1.0
     
-    if norm1 in norm2 or norm2 in norm1:
-        longer = max(len(norm1), len(norm2))
-        shorter = min(len(norm1), len(norm2))
-        score = shorter / longer
-        return True, score
+    # Minimum length for partial matching to avoid short word false matches
+    MIN_LENGTH = 4
     
+    # One is contained in the other (compound words)
+    if len(norm1) >= MIN_LENGTH and len(norm2) >= MIN_LENGTH:
+        # Only match if the common part is at the start or end of the word
+        # and is at least MIN_LENGTH characters
+        if (norm1.startswith(norm2) or norm1.endswith(norm2) or 
+            norm2.startswith(norm1) or norm2.endswith(norm1)):
+            # Calculate how much of the longer word is matched
+            longer = max(len(norm1), len(norm2))
+            shorter = min(len(norm1), len(norm2))
+            if shorter >= MIN_LENGTH:  # Only count if substantial overlap
+                score = shorter / longer
+                return True, score
+    
+    # Common prefixes in compound words
     common_prefixes = {
         'klima', 'miljø', 'natur', 'energi', 'kraft', 'samfunns',
-        'bære', 'øko', 'sirkulær', 'fornybar', 'grønn', 'bio'
+        'bære', 'øko', 'sirkulær', 'fornybar', 'grønn', 'bio',
+        'areal', 'ressurs', 'karbon', 'vind', 'sol', 'vann',
+        'beredskap', 'kommune', 'fylke'
     }
     
+    # Check for common prefixes, but only match if they're actually at the start
     for prefix in common_prefixes:
-        if (norm1.startswith(prefix) and norm2.startswith(prefix)) or \
-           (norm1.endswith(prefix) and norm2.endswith(prefix)):
+        if (norm1.startswith(prefix) and norm2.startswith(prefix)):
             return True, 0.8
     
     return False, 0.0
