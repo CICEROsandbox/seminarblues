@@ -344,7 +344,6 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
     return embeddings
 
 def main():
-    
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
     
@@ -368,64 +367,63 @@ def main():
     
     api_key = st.secrets["OPENAI_API_KEY"]
     
-    # Load data
+    # Load data - Move this outside of any control flow
     all_data = []
     for source_config in DATA_SOURCES:
-        df = load_source_data(source_config)
-        if df is not None:
-            all_data.append(df)
+        source_df = load_source_data(source_config)
+        if source_df is not None:
+            all_data.append(source_df)
     
     if not all_data:
         st.error("Could not load any data sources. Please check the data files.")
         st.stop()
     
+    # Create the combined DataFrame early
     df = pd.concat(all_data, ignore_index=True)
     st.write(f"Total records loaded: {len(df)}")
     
-    # Process embeddings
+    # Process embeddings early
     cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create input layout
-# Create input layout
-col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
+    selected_keywords = set()  # Initialize selected_keywords
 
-with col1:
-    query = st.text_area(
-        "Beskriv seminar-temaet:",
-        height=100,
-        placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
-    )
-    
-    # Note: This block should be at the same indentation level as the query text_area
-    if query:
-        # Extract and display suggested keywords
-        suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
-        if suggested_keywords:
-            st.divider()
-            selected_keywords = render_keyword_selection(suggested_keywords)
-            
-            # Show selected keywords count
-            if selected_keywords:
-                st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
-        else:
-            st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
+    with col1:
+        query = st.text_area(
+            "Beskriv seminar-temaet:",
+            height=100,
+            placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
+        )
+        
+        if query:
+            # Extract and display suggested keywords
+            suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
+            if suggested_keywords:
+                st.divider()
+                selected_keywords = render_keyword_selection(suggested_keywords)
+                
+                if selected_keywords:
+                    st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
+            else:
+                st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
 
-with col2:
-    num_suggestions = st.slider(
-        "Antall forslag å vurdere:",
-        min_value=3,
-        max_value=15,
-        value=5
-    )
-    
-    min_similarity = st.slider(
-        "Minimum relevans (0-1):",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.35,
-        step=0.05
-    )
-    
+    with col2:
+        num_suggestions = st.slider(
+            "Antall forslag å vurdere:",
+            min_value=3,
+            max_value=15,
+            value=5
+        )
+        
+        min_similarity = st.slider(
+            "Minimum relevans (0-1):",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.35,
+            step=0.05
+        )
+
     with col3:
         selected_sources = st.multiselect(
             "Filtrer kilder:",
@@ -437,20 +435,19 @@ with col2:
     if st.button("Finn deltakere", type="primary"):
         if query:
             with st.spinner("Søker etter relevante deltakere..."):
-                # Use selected keywords in similarity calculation
+                # Now df is defined and we can use it safely
                 source_mask = df['source'].isin(selected_sources)
                 filtered_df = df[source_mask].reset_index(drop=True)
                 filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
                 
-                # Pass selected keywords to find_similar_content
                 results = find_similar_content(
                     query,
                     filtered_df,
                     filtered_embeddings,
                     api_key,
                     top_k=num_suggestions,
-                    boost_keywords=selected_keywords  # New parameter
-                )
+                    boost_keywords=selected_keywords
+                ) 
                 
                 if results:
                     speakers_dict = {}
