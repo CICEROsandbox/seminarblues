@@ -147,6 +147,10 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
+    import openai
+    # Display the OpenAI library version
+    st.write(f"OpenAI Library Version: {openai.__version__}")
+    
     # Get API key from secrets
     api_key = st.secrets["OPENAI_API_KEY"]
 
