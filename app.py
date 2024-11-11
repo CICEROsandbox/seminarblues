@@ -246,12 +246,12 @@ def main():
                     top_k=num_suggestions
                 )
                 
-if results:
+                if results:
                     # Process speakers with better tracking of sources
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
-                            speaker_key = f"{speaker}_{result['index']}"  # Note: using 'index' not 'original_index'
+                            speaker_key = f"{speaker}_{result['index']}"
                             if speaker_key not in speakers_dict or result['similarity'] > speakers_dict[speaker_key]['similarity']:
                                 speakers_dict[speaker_key] = {
                                     'name': speaker,
@@ -264,12 +264,7 @@ if results:
                     # Convert to list and sort
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
-  
-                    for speaker in result['speakers']:
-speaker_key = f"{speaker}_{result['original_index']}" 
-                            
-                    # Find this section in the main() function, around line 250-300:
-
+                    
                     if speakers:
                         # Get GPT analysis for categorization
                         with st.spinner("Kategoriserer deltakere..."):
@@ -282,7 +277,6 @@ speaker_key = f"{speaker}_{result['original_index']}"
                         # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
-                        # REPLACE THIS ENTIRE FOR-LOOP SECTION:
                         for i, speaker in enumerate(speakers, 1):
                             with st.expander(
                                 f"🎤 {speaker['name']} - {speaker['similarity']:.0%} relevans", 
@@ -310,7 +304,7 @@ speaker_key = f"{speaker}_{result['original_index']}"
                                         st.markdown(f"[Gå til arrangement](arendalsuka.no)")  # Add actual URL pattern
                                     else:
                                         st.markdown(f"[Gå til høring](stortinget.no)")  # Add actual URL pattern
-
+                        
                         # Add download button
                         st.download_button(
                             "Last ned forslag som CSV",
