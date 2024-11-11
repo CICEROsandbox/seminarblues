@@ -7,7 +7,6 @@ import os
 from typing import Dict, List, Optional
 
 # Define data source configurations as dictionaries
-# Update the parliament source configuration in DATA_SOURCES
 DATA_SOURCES = [
     {
         "name": "arendalsuka",
@@ -19,11 +18,11 @@ DATA_SOURCES = [
     },
     {
         "name": "parliament_hearings",
-        "file_path": "data/stortinget-hearings.csv",
-        "text_columns": ['Høringssak', 'Innhold - høring'],  # Combining hearing title and content
-        "speaker_column": 'Innsender',  # Organization/person submitting the response
+        "file_path": "data/stortinget-hearings.csv",  # Fixed filename to match actual file
+        "text_columns": ['Høringssak', 'Innhold - høring'],
+        "speaker_column": 'Innsender',
         "event_column": 'Høringssak',
-        "separator": ";",  # Specify semicolon separator for this source
+        "separator": ";"
     }
 ]
 
