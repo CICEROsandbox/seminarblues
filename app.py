@@ -7,15 +7,12 @@ from typing import Dict, List, Optional
 
 # System instructions for GPT
 SYSTEM_INSTRUCTIONS = """
-Du er en erfaren rådgiver som skal hjelpe med å finne relevante deltakere til seminarer og arrangementer. 
-Din oppgave er å analysere foreslåtte deltakere og:
-1. Gruppere deltakerne etter type (f.eks. forskere, politikere, organisasjoner, næringsliv)
-2. Forklare hvorfor de vil være relevante for seminaret
-3. Foreslå en god sammensetning av panel eller deltakerliste
-4. Identifisere eventuelle perspektiver eller grupper som mangler
-5. Gi konkrete råd om hvem som bør prioriteres å invitere og hvorfor
+Du er en rådgiver som skal hjelpe med å kategorisere potensielle deltakere til seminarer.
+Din oppgave er å:
+1. Gruppere deltakerne etter type (f.eks. forskere, politikere, organisasjoner, næringsliv, etc.)
+2. Liste opp gruppene på en oversiktlig måte
 
-Bruk en uformell, men profesjonell tone. Vær konkret i anbefalingene.
+Bruk en kort og presis tone. Fokuser kun på å kategorisere deltakerne i relevante grupper.
 """
 
 # Configuration
@@ -26,7 +23,8 @@ DATA_SOURCES = [
         "text_columns": ['title', 'header', 'om_arrangementet'],
         "speaker_column": 'medvirkende',
         "date_column": 'date',
-        "event_column": 'title'
+        "event_column": 'title',
+        "content_column": 'om_arrangementet'
     },
     {
         "name": "parliament_hearings",
@@ -34,6 +32,7 @@ DATA_SOURCES = [
         "text_columns": ['Høringssak', 'Innhold - høring'],
         "speaker_column": 'Innsender',
         "event_column": 'Høringssak',
+        "content_column": 'Innhold - høring',
         "separator": ";"
     }
 ]
@@ -128,6 +127,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             'similarity': similarities[idx],
             'source': entry['source'],
             'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
+            'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
             'combined_text': entry['combined_text']
         })
     
@@ -245,6 +245,7 @@ def main():
                                 speakers_dict[speaker] = {
                                     'similarity': result['similarity'],
                                     'context': result['context'],
+                                    'content': result['content'],
                                     'source': result['source']
                                 }
                     
@@ -256,11 +257,11 @@ def main():
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
                     if speakers:
-                        # Get GPT analysis
-                        with st.spinner("Analyserer forslag..."):
+                        # Get GPT analysis for categorization
+                        with st.spinner("Kategoriserer deltakere..."):
                             analysis = get_gpt_analysis(query, speakers, api_key)
                             if analysis:
-                                st.subheader("💡 Analyse og anbefalinger")
+                                st.subheader("🏷️ Kategorisering av deltakere")
                                 st.write(analysis)
                                 st.divider()
                         
@@ -274,12 +275,26 @@ def main():
                             ):
                                 cols = st.columns([2, 1])
                                 with cols[0]:
-                                    st.write("**Funnet i:**", speaker['context'])
+                                    if speaker['source'] == 'arendalsuka':
+                                        st.write("**Deltaker i arrangement:**", speaker['context'])
+                                        if pd.notna(speaker['content']):
+                                            with st.expander("Se arrangementsbeskrivelse"):
+                                                st.write(speaker['content'])
+                                    else:  # parliament hearings
+                                        st.write("**Innspill til høring:**", speaker['context'])
+                                        if pd.notna(speaker['content']):
+                                            with st.expander("Se høringsinnspill"):
+                                                st.write(speaker['content'])
+                                    
                                     st.write("**Kilde:**", 
                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
                                            else "Stortingshøringer")
                                 with cols[1]:
                                     st.metric("Relevans", f"{speaker['similarity']:.2%}")
+                                    if speaker['source'] == 'arendalsuka':
+                                        st.markdown(f"[Gå til arrangement](arendalsuka.no)")  # Add actual URL pattern
+                                    else:
+                                        st.markdown(f"[Gå til høring](stortinget.no)")  # Add actual URL pattern
                         
                         # Add download button
                         st.download_button(
