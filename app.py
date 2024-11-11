@@ -186,7 +186,7 @@ def calculate_similarity(
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with emphasis on climate research relevance and selected keywords"""
+    """Calculate semantic similarity with emphasis on selected keywords and content relevance"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
@@ -206,41 +206,52 @@ def calculate_similarity(
     # Find matching words
     matching_words = query_words.intersection(doc_words)
     
-    # Calculate climate keyword relevance
+    # Enhanced keyword matching
+    keyword_matches = 0
+    matched_keywords = set()
+    if boost_keywords:
+        for keyword in boost_keywords:
+            # Check for exact matches
+            if keyword in doc_words:
+                keyword_matches += 1
+                matched_keywords.add(keyword)
+            # Check for partial matches
+            else:
+                for doc_word in doc_words:
+                    if keyword in doc_word or doc_word in keyword:
+                        keyword_matches += 0.5  # Partial match gets half weight
+                        matched_keywords.add(keyword)
+                        break
+        
+        keyword_score = keyword_matches / len(boost_keywords)
+    else:
+        keyword_score = 0
+    
+    # Calculate climate relevance
     climate_words_doc = {word for word in doc_words if any(
         climate_term in word for climate_term in CLIMATE_KEYWORDS
     )}
+    climate_score = len(climate_words_doc) / (len(doc_words) + 1)  # Avoid division by zero
     
-    # Selected keywords boost
-    selected_keyword_matches = 0
-    if boost_keywords:
-        selected_keyword_matches = sum(
-            1 for keyword in boost_keywords
-            if any(keyword.lower() in word.lower() for word in doc_words)
-        )
-        selected_keyword_ratio = selected_keyword_matches / len(boost_keywords)
-    else:
-        selected_keyword_ratio = 0
-    
-    # Calculate final score with components
+    # Calculate final score with adjusted weights
     final_score = (
-        0.50 * max(0, cos_sim) +                # Base semantic similarity
-        0.20 * selected_keyword_ratio +         # Selected keywords boost
-        0.20 * len(climate_words_doc) / 10 +    # Climate terms presence
-        0.10 * len(matching_words) / len(query_words) if query_words else 0  # General relevance
+        0.30 * max(0, cos_sim) +           # Base semantic similarity
+        0.40 * keyword_score +             # Selected keywords (increased weight)
+        0.20 * climate_score +             # Climate relevance
+        0.10 * len(matching_words) / (len(query_words) + 1)  # General word overlap
     )
     
-    # Apply threshold adjustments
-    if final_score < 0.2:
-        final_score *= 0.5
+    # Apply thresholds
+    if keyword_score == 0 and boost_keywords:  # If no keyword matches when keywords were selected
+        final_score *= 0.5  # Significant penalty
     elif final_score > 0.8:
-        final_score = 0.8 + (final_score - 0.8) * 0.5
+        final_score = 0.8 + (final_score - 0.8) * 0.5  # Dampen very high scores
     
-    return final_score, matching_words
+    return final_score, matched_keywords
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
-    """Find similar content with climate research context"""
+    """Find similar content with emphasis on selected keywords"""
     # Add climate research context to the query
     climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
     enhanced_query = climate_context + query_text
@@ -255,46 +266,44 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            similarity, matching_words = calculate_similarity(
+            similarity, matched_keywords = calculate_similarity(
                 query_embedding, 
                 emb,
                 query_text,
-                df.iloc[i]['combined_text']
+                df.iloc[i]['combined_text'],
+                boost_keywords
             )
             
             similarities.append({
                 'index': i,
                 'score': similarity,
                 'source': df.iloc[i]['source'],
-                'matching_words': matching_words
+                'matched_keywords': matched_keywords
             })
             
             texts_for_debug.append((
                 df.iloc[i]['combined_text'][:200],
                 similarity,
                 df.iloc[i]['source'],
-                matching_words
+                matched_keywords
             ))
-        else:
-            similarities.append({
-                'index': i,
-                'score': 0,
-                'source': df.iloc[i]['source'],
-                'matching_words': set()
-            })
     
     # Enhanced debug information
     with st.expander("Search Analysis", expanded=False):
         st.write(f"Query: '{query_text}'")
+        if boost_keywords:
+            st.write(f"Selected keywords: {', '.join(boost_keywords)}")
         st.write("Top matches:")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:5]
-        for text, sim, source, matching_words in sorted_debug:
+        for text, sim, source, keywords in sorted_debug:
             st.write("\n---")
             st.write(f"Source: {source}")
             st.write(f"Score: {sim:.3f}")
-            if matching_words:
-                st.write(f"Matching words: {', '.join(matching_words)}")
-            st.write(f"Text: {text}")
+            if keywords:
+                st.write(f"Matched keywords: {', '.join(keywords)}")
+            st.write(f"Text preview: {text}")
+    
+    # [Rest of the function remains the same...]
     
     # Filter and group results by source
     max_per_source = min(3, top_k)  # Maximum results per source
