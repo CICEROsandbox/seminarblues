@@ -258,7 +258,7 @@ def main():
                             # Display collapsed label with name, organization, and preview
                             collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
                             
-                            with st.expander(collapsed_label, expanded=i<=3):  # Show the first 3 expanded by default
+                            with st.expander(collapsed_label, expanded=False):  # Show the first 3 expanded by default
                                 cols = st.columns([2, 1])
                                 with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
