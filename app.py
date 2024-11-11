@@ -35,7 +35,7 @@ CLIMATE_KEYWORDS = {
     'klimapolitikk', 'klimarisiko', 'klimatjeneste', 'luftforurensning',
     'landbruk', 'metan', 'nedbør', 'olje', 'gass', 'atmosfære', 'omstilling',
     'sirkulærøkonomi', 'skog', 'teknologi', 'temperatur', 'tilpasning',
-    'transport', 'utslipp', 'vindkraft', 'klimaendring'
+    'transport', 'utslipp', 'vindkraft', 'klimaendring', 'EU'
 }
 
 CLIMATE_CATEGORIES = {
