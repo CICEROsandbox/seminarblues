@@ -595,14 +595,14 @@ def main():
                                 f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
                                 expanded=i<=3
                             ):
-                                cols = st.columns([2, 1])
-                                with cols[0]:
+                                cols = st.columns([2, 1])with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
-                                        st.write("**Deltaker i arrangement:**", 
+                                        st.markdown("**Deltaker i arrangement:** " + 
                                                 highlight_keywords(speaker['context'], 
-                                                                set(speaker['matched_keywords'])))
+                                                                set(speaker['matched_keywords'])),
+                                                unsafe_allow_html=True)
                                         if pd.notna(speaker['content']):
-                                            st.write("**Arrangementsbeskrivelse:**")
+                                            st.markdown("**Arrangementsbeskrivelse:**")
                                             st.markdown(
                                                 f'<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px;">'
                                                 f'{highlight_keywords(speaker["content"], set(speaker["matched_keywords"]))}'
@@ -610,11 +610,12 @@ def main():
                                                 unsafe_allow_html=True
                                             )
                                     else:  # parliament hearings
-                                        st.write("**Innspill til høring:**", 
+                                        st.markdown("**Innspill til høring:** " + 
                                                 highlight_keywords(speaker['context'], 
-                                                                set(speaker['matched_keywords'])))
+                                                                set(speaker['matched_keywords'])),
+                                                unsafe_allow_html=True)
                                         if pd.notna(speaker['content']):
-                                            st.write("**Høringsinnspill:**")
+                                            st.markdown("**Høringsinnspill:**")
                                             st.markdown(
                                                 f'<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px;">'
                                                 f'{highlight_keywords(speaker["content"], set(speaker["matched_keywords"]))}'
@@ -622,9 +623,9 @@ def main():
                                                 unsafe_allow_html=True
                                             )
                                     
-                                    st.write("**Kilde:**", 
-                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
-                                            else "Stortingshøringer")
+                                    st.markdown("**Kilde:** " + 
+                                            ("Arendalsuka" if speaker['source'] == "arendalsuka" 
+                                            else "Stortingshøringer"))
                                 with cols[1]:
                                     st.metric("Relevans", f"{speaker['similarity']:.1%}")
                                     # Show matched keywords
