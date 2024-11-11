@@ -95,10 +95,13 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     texts_for_debug = []  # For debugging
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            similarity = 1 - cosine(query_embedding, emb)
-            similarities.append(similarity)
+            # Calculate raw similarity
+            raw_similarity = 1 - cosine(query_embedding, emb)
+            # Scale the similarity to avoid 100% matches
+            scaled_similarity = raw_similarity * 0.8  # Scale down to max 80%
+            similarities.append(scaled_similarity)
             # Store some debug info
-            texts_for_debug.append((df.iloc[i]['combined_text'][:100], similarity))
+            texts_for_debug.append((df.iloc[i]['combined_text'][:100], scaled_similarity))
         else:
             similarities.append(0)
     
@@ -115,13 +118,14 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         'text': df['combined_text'].tolist()  # Add text for verification
     })
     
-    # Filter out low similarities first
-    similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
+    # Filter out low similarities first (increased threshold)
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.3]
     
     # Get top_k most similar entries
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
-    results = []
+    # Double check the sorting
+    temp_results = []
     for idx in top_indices:
         entry = df.iloc[idx]
         source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
@@ -135,7 +139,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 speakers = [entry[source_config["speaker_column"]].strip()]
         
         # Add result with full context
-        results.append({
+        temp_results.append({
             'index': idx,
             'speakers': speakers,
             'similarity': float(similarities[idx]),
@@ -143,6 +147,9 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
             'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
         })
+    
+    # Ensure correct sorting
+    results = sorted(temp_results, key=lambda x: x['similarity'], reverse=True)
     
     return results
 
