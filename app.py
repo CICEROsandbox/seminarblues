@@ -5,12 +5,6 @@ import numpy as np
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
 
-# System instructions for GPT
-SYSTEM_INSTRUCTIONS = """
-Du er en rådgiver som skal hjelpe med å kategorisere potensielle deltakere til seminarer.
-Bruk en kort og presis tone. 
-"""
-
 # Configuration
 DATA_SOURCES = [
     {
@@ -89,8 +83,6 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     progress_bar.empty()
     return embeddings
 
-# Remove the GPT-related parts and modify the find_similar_content function:
-
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings"""
@@ -154,80 +146,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     return results
 
-# In the main() function, remove the GPT analysis part and modify the results display:
-                if results:
-                    # Process speakers with better tracking of sources
-                    speakers_dict = {}
-                    for result in results:
-                        for speaker in result['speakers']:
-                            speaker_key = f"{speaker}_{result['index']}"
-                            if speaker_key not in speakers_dict or result['similarity'] > speakers_dict[speaker_key]['similarity']:
-                                speakers_dict[speaker_key] = {
-                                    'name': speaker,
-                                    'similarity': result['similarity'],
-                                    'context': result['context'],
-                                    'content': result['content'],
-                                    'source': result['source']
-                                }
-                    
-                    # Convert to list and sort
-                    speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
-                    speakers.sort(key=lambda x: x['similarity'], reverse=True)
-                    
-                    if speakers:
-                        # Display detailed results
-                        st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
-                        
-                        for i, speaker in enumerate(speakers, 1):
-                            with st.expander(
-                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
-                                expanded=i<=3
-                            ):
-                                cols = st.columns([2, 1])
-                                with cols[0]:
-                                    if speaker['source'] == 'arendalsuka':
-                                        st.write("**Deltaker i arrangement:**", speaker['context'])
-                                        if pd.notna(speaker['content']):
-                                            st.write("**Arrangementsbeskrivelse:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-                                    else:  # parliament hearings
-                                        st.write("**Innspill til høring:**", speaker['context'])
-                                        if pd.notna(speaker['content']):
-                                            st.write("**Høringsinnspill:**")
-                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
-                                    
-                                    st.write("**Kilde:**", 
-                                           "Arendalsuka" if speaker['source'] == "arendalsuka" 
-                                           else "Stortingshøringer")
-                                with cols[1]:
-                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
-
-def get_gpt_analysis(query: str, speakers: List[Dict], api_key: str) -> Optional[str]:
-    """Get GPT analysis of the suggestions"""
-    try:
-        client = OpenAI(api_key=api_key)
-        context = f"""
-Seminartema: {query}
-
-Potensielle deltakere (sortert etter relevans):
-"""
-        for s in speakers:
-            context += f"\n- {s['name']} (fra {s['context']})"
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": SYSTEM_INSTRUCTIONS},
-                {"role": "user", "content": context}
-            ],
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Feil ved GPT-analyse: {str(e)}")
-        return None
-
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
@@ -277,7 +195,7 @@ def main():
             "Minimum relevans (0-1):",
             min_value=0.0,
             max_value=1.0,
-            value=0.5,
+            value=0.2,
             step=0.05
         )
     
@@ -325,20 +243,12 @@ def main():
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
                     if speakers:
-                        # Get GPT analysis for categorization
-                        with st.spinner("Kategoriserer deltakere..."):
-                            analysis = get_gpt_analysis(query, speakers, api_key)
-                            if analysis:
-                                st.subheader("🏷️ Kategorisering av deltakere")
-                                st.write(analysis)
-                                st.divider()
-                        
                         # Display detailed results
                         st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
                         
                         for i, speaker in enumerate(speakers, 1):
                             with st.expander(
-                                f"🎤 {speaker['name']} - {speaker['similarity']:.0%} relevans", 
+                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
                                 expanded=i<=3
                             ):
                                 cols = st.columns([2, 1])
@@ -358,11 +268,11 @@ def main():
                                            "Arendalsuka" if speaker['source'] == "arendalsuka" 
                                            else "Stortingshøringer")
                                 with cols[1]:
-                                    st.metric("Relevans", f"{speaker['similarity']:.2%}")
+                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
                                     if speaker['source'] == 'arendalsuka':
-                                        st.markdown(f"[Gå til arrangement](arendalsuka.no)")  # Add actual URL pattern
+                                        st.markdown(f"[Gå til arrangement](arendalsuka.no)")
                                     else:
-                                        st.markdown(f"[Gå til høring](stortinget.no)")  # Add actual URL pattern
+                                        st.markdown(f"[Gå til høring](stortinget.no)")
                         
                         # Add download button
                         st.download_button(
