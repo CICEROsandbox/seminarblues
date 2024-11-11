@@ -92,9 +92,9 @@ def calculate_similarity(query_embedding: List[float], doc_embedding: List[float
     # Calculate final score with weighted components
     # Base similarity (50%), word overlap (30%), early matches (20%)
     final_score = (
-        0.60 * max(0, cos_sim) +  # Ensure non-negative
+        0.65 * max(0, cos_sim) +  # Ensure non-negative
         0.30 * overlap_ratio +
-        0.10 * early_match_ratio
+        0.05 * early_match_ratio
     )
     
     # Apply threshold adjustments
