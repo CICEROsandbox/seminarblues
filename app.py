@@ -100,7 +100,8 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     similarities = []
     for emb in cached_embeddings:
         if emb:
-            similarity = 1 - cosine(query_embedding, emb)
+            # Add a small random factor to break ties and avoid perfect matches
+            similarity = (1 - cosine(query_embedding, emb)) * 0.95  # Scale down slightly
             similarities.append(similarity)
         else:
             similarities.append(0)
@@ -111,8 +112,8 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         'similarity': similarities
     })
     
-    # Get top_k most similar entries
-    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
+    # Get top_k most similar entries, but only if they're actually similar
+    top_indices = similarity_df[similarity_df['similarity'] > 0.1].nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
     for idx in top_indices:
@@ -129,9 +130,9 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         
         # Add result with full context
         results.append({
-            'index': idx,  # Store the original index
+            'index': idx,
             'speakers': speakers,
-            'similarity': similarities[idx],
+            'similarity': float(similarities[idx]),  # Ensure it's a float
             'source': entry['source'],
             'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
             'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
