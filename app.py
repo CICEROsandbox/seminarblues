@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
+import openai
 import numpy as np
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
@@ -49,7 +49,6 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
-@st.cache_data
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
     """Get the embedding for a given text."""
     try:
@@ -62,7 +61,6 @@ def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
-
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
@@ -152,7 +150,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     return results
 
-
 def main():
     st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
@@ -214,23 +211,21 @@ def main():
             format_func=lambda x: "Arendalsuka" if x == "arendalsuka" else "Stortingshøringer"
         )
 
-if st.button("Finn deltakere", type="primary"):
-    if query:
-        with st.spinner("Søker etter relevante deltakere..."):
-            # Filter by selected sources
-            source_mask = df['source'].isin(selected_sources)
-            filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices here
-            filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
-            
-            results = find_similar_content(
-                query, 
-                filtered_df, 
-                filtered_embeddings,
-                api_key, 
-                top_k=num_suggestions
-            )
-            # ... rest of your code ...
-
+    if st.button("Finn deltakere", type="primary"):
+        if query:
+            with st.spinner("Søker etter relevante deltakere..."):
+                # Filter by selected sources
+                source_mask = df['source'].isin(selected_sources)
+                filtered_df = df[source_mask].reset_index(drop=True)  # Reset indices here
+                filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
+                
+                results = find_similar_content(
+                    query, 
+                    filtered_df, 
+                    filtered_embeddings,
+                    api_key, 
+                    top_k=num_suggestions
+                )
                 
                 if results:
                     # Process speakers with better tracking of sources
@@ -262,7 +257,7 @@ if st.button("Finn deltakere", type="primary"):
                             # Display collapsed label with name, organization, and preview
                             collapsed_label = f"🎤 {speaker['name']} - {speaker['similarity'] * 100:.0f}% relevans: {preview_text}"
                             
-                            with st.expander(collapsed_label, expanded=False):  # Show the first 3 expanded by default
+                            with st.expander(collapsed_label, expanded=False):  # All results are collapsed by default
                                 cols = st.columns([2, 1])
                                 with cols[0]:
                                     if speaker['source'] == 'arendalsuka':
