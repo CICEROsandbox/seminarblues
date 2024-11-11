@@ -51,214 +51,99 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
 
 @st.cache_data
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
-    """Get embedding for a single text using OpenAI API with verification"""
+    """Get embedding with semantic preprocessing"""
     try:
         client = OpenAI(api_key=_api_key)
-        # Preprocess text to ensure it's clean
-        cleaned_text = _text.strip()
-        if not cleaned_text:
-            return None
-            
+        # Expand the query to capture semantic meaning
+        enriched_text = (
+            f"Topic and key concepts: {_text}\n"
+            f"This text should be matched with content about: {_text}\n"
+            f"Key themes and related areas: {_text}"
+        )
+        
         response = client.embeddings.create(
-            input=cleaned_text,
+            input=enriched_text,
             model="text-embedding-ada-002"
         )
-        embedding = response.data[0].embedding
-        
-        # Verify we got a valid embedding
-        if not embedding or len(embedding) != 1536:  # OpenAI embeddings should be 1536-dimensional
-            st.error(f"Invalid embedding received for text: {_text[:100]}...")
-            return None
-            
-        return embedding
+        return response.data[0].embedding
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content with improved debugging and verification"""
-    # Get query embedding
-    query_embedding = get_embedding(query_text, _api_key)
-    if not query_embedding:
-        st.error("Failed to get query embedding")
-        return []
-    
-    # Debug: Print query information
-    st.write("Debug - Query Info:")
-    st.write(f"Query text: {query_text}")
-    st.write(f"Query embedding size: {len(query_embedding)}")
-    
-    # Calculate similarities for all entries
-    similarities = []
-    texts_for_debug = []
-    
-    for i, emb in enumerate(cached_embeddings):
-        if emb and len(emb) == len(query_embedding):
-            # Calculate cosine similarity
-            cos_sim = 1 - cosine(query_embedding, emb)
-            
-            # Apply more nuanced scaling
-            if cos_sim < 0.5:  # Low relevance
-                scaled_similarity = cos_sim * 0.5
-            elif cos_sim < 0.7:  # Medium relevance
-                scaled_similarity = 0.25 + (cos_sim - 0.5) * 1.5
-            else:  # High relevance
-                scaled_similarity = 0.55 + (cos_sim - 0.7) * 1.5
-                
-            similarities.append(scaled_similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], cos_sim, scaled_similarity))
-        else:
-            similarities.append(0)
-            if emb:
-                st.warning(f"Embedding size mismatch at index {i}: {len(emb)} vs {len(query_embedding)}")
-    
-    # Enhanced debug information
-    with st.expander("Debug Information", expanded=True):
-        st.write("Query:", query_text)
-        st.write("Top 5 matched texts (with scores):")
-        sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:5]
-        for text, raw_sim, scaled_sim in sorted_debug:
-            st.write("\nText:", text)
-            st.write(f"Raw similarity: {raw_sim:.3f}")
-            st.write(f"Scaled similarity: {scaled_sim:.3f}")
-            st.write("---")
-    
-    # Create similarity DataFrame
-    similarity_df = pd.DataFrame({
-        'index': range(len(similarities)),
-        'similarity': similarities
-    })
-    
-    # Filter low-relevance results
-    threshold = 0.3
-    similarity_df = similarity_df[similarity_df['similarity'] > threshold]
-    
-    # Get top_k matches
-    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
-    
-    results = []
-    for idx in top_indices:
-        entry = df.iloc[idx]
-        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
-        
-        speakers = []
-        if pd.notna(entry[source_config["speaker_column"]]):
-            if '\n' in str(entry[source_config["speaker_column"]]):
-                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
-            else:
-                speakers = [entry[source_config["speaker_column"]].strip()]
-        
-        final_similarity = similarities[idx]
-        
-        results.append({
-            'index': idx,
-            'speakers': speakers,
-            'similarity': final_similarity,
-            'source': entry['source'],
-            'context': entry.get(source_config["event_column"], ''),
-            'content': entry.get(source_config["content_column"], ''),
-        })
-    
-    return results
-
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process texts with improved error checking and debugging"""
+    """Process texts with semantic context"""
     embeddings = []
     total = len(texts)
     
-    progress_text = "Calculating embeddings..."
+    progress_text = "Analyzing text content..."
     progress_bar = st.progress(0, text=progress_text)
     
-    # Debug counters
-    successful = 0
-    failed = 0
-    
     for i, text in enumerate(texts):
-        emb = get_embedding(text, _api_key)
-        if emb:
-            successful += 1
-            embeddings.append(emb)
-        else:
-            failed += 1
-            embeddings.append(None)
-            st.warning(f"Failed to get embedding for text: {text[:100]}...")
+        # Enrich the content text with structural context
+        enriched_text = (
+            f"Event or hearing description: {text}\n"
+            f"Main topics and themes: {text}\n"
+            f"Key concepts and subject areas: {text}"
+        )
         
-        # Update progress
+        emb = get_embedding(enriched_text, _api_key)
+        embeddings.append(emb)
+        
         progress = (i + 1) / total
         progress_bar.progress(progress, text=f"{progress_text} ({i+1}/{total})")
     
     progress_bar.empty()
-    
-    # Show embedding statistics
-    st.write(f"Embeddings processed: {successful} successful, {failed} failed")
-    
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         _api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content using pre-computed embeddings with realistic similarity scoring"""
+    """Find semantically similar content"""
     query_embedding = get_embedding(query_text, _api_key)
     if not query_embedding:
         return []
     
-    # Calculate similarities for all entries
+    # Calculate semantic similarities
     similarities = []
     texts_for_debug = []
     
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Calculate raw cosine similarity
+            # Basic cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Apply more realistic scaling:
-            # 1. Start with raw cosine similarity
-            # 2. Apply sigmoid-like transformation to spread out the middle range
-            # 3. Penalize low similarities more aggressively
-            
-            # First, center the similarity scores around 0.5
-            centered_sim = cos_sim - 0.5
-            
-            # Apply sigmoid-like transformation
-            if centered_sim > 0:
-                scaled_similarity = 0.5 + (centered_sim * 0.8)  # Reduce upper range
-            else:
-                scaled_similarity = 0.5 + (centered_sim * 2.0)  # Increase lower range penalty
-            
-            # Additional penalty for very low similarities
-            if cos_sim < 0.7:  # Higher threshold for relevance
-                scaled_similarity *= (cos_sim / 0.7)  # Progressive penalty
-            
-            # Ensure we stay within 0-1 range
-            scaled_similarity = max(0.0, min(1.0, scaled_similarity))
+            # Scale similarity based on semantic relevance thresholds
+            # These thresholds are calibrated for semantic matching
+            if cos_sim < 0.75:  # Low semantic relevance
+                scaled_similarity = cos_sim * 0.4  # Significant penalty for low relevance
+            elif cos_sim < 0.85:  # Moderate semantic relevance
+                scaled_similarity = 0.3 + (cos_sim - 0.75) * 2  # More gradual scaling
+            else:  # High semantic relevance
+                scaled_similarity = 0.5 + (cos_sim - 0.85) * 3  # Reward high relevance
             
             similarities.append(scaled_similarity)
             texts_for_debug.append((df.iloc[i]['combined_text'][:200], cos_sim, scaled_similarity))
         else:
             similarities.append(0)
     
-    # Enhanced debug information
-    with st.expander("Debug Information", expanded=False):
-        st.write("Top 3 matched texts (with detailed scoring):")
+    # Debug information
+    with st.expander("Semantic Analysis Debug", expanded=False):
+        st.write(f"Search query: '{query_text}'")
+        st.write("Top matches with semantic relevance:")
         sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:3]
         for text, raw_sim, scaled_sim in sorted_debug:
-            st.write(f"Raw similarity: {raw_sim:.3f}")
-            st.write(f"Scaled similarity: {scaled_sim:.3f}")
-            st.write(f"Text: {text}...")
+            st.write(f"\nRelevance score: {scaled_sim:.2f}")
+            st.write(f"Content: {text}")
             st.write("---")
     
-    # Use stricter filtering
+    # Filter and rank results
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities
     })
     
-    # Much stricter threshold for filtering
-    min_similarity = 0.4  # Base threshold
-    similarity_df = similarity_df[similarity_df['similarity'] > min_similarity]
-    
-    # Get top_k matches
+    # Higher threshold for semantic relevance
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.35]
     top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
@@ -273,15 +158,10 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             else:
                 speakers = [entry[source_config["speaker_column"]].strip()]
         
-        # Apply final percentage scaling
-        final_similarity = similarities[idx]
-        # Convert to a more realistic percentage range
-        percentage_similarity = final_similarity * 100
-        
         results.append({
             'index': idx,
             'speakers': speakers,
-            'similarity': percentage_similarity / 100,  # Keep as decimal but with realistic scaling
+            'similarity': float(similarities[idx]),
             'source': entry['source'],
             'context': entry.get(source_config["event_column"], ''),
             'content': entry.get(source_config["content_column"], ''),
@@ -295,14 +175,14 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
 
-    # Get API key from secrets
+    # Initialize OpenAI client
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("OpenAI API key not found in secrets!")
         st.stop()
     
     api_key = st.secrets["OPENAI_API_KEY"]
-
-    # Load data from all sources
+    
+    # Load and process data
     all_data = []
     with st.spinner("Laster inn data..."):
         for source_config in DATA_SOURCES:
@@ -316,9 +196,11 @@ def main():
         
     df = pd.concat(all_data, ignore_index=True)
     
-    # Pre-compute embeddings
-    with st.spinner("Forbereder søkefunksjonalitet..."):
+    # Pre-compute embeddings with semantic context
+    with st.spinner("Analyserer innhold..."):
         cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+    
+    # Rest of your main function remains the same...
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
