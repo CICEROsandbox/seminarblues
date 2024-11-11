@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-import openai
+from openai import OpenAI
 import numpy as np
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional
@@ -49,18 +49,22 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
 
+@st.cache_data
 def get_embedding_cached(_text: str, api_key: str) -> Optional[List[float]]:
-    """Get the embedding for a given text using the updated OpenAI API."""
+    """Cached version of get_embedding that doesn't use the client object"""
     try:
-        openai.api_key = api_key
-        response = openai.Embedding.create(
+        client = OpenAI(api_key=api_key)
+        response = client.embeddings.create(
             input=_text,
             model="text-embedding-ada-002"
         )
-        return response['data'][0]['embedding']
+        return response.data[0].embedding
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
+
+# ... rest of your code ...
+
 
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optional[List[float]]]:
