@@ -5,6 +5,7 @@ from openai import OpenAI
 from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional, Set, Tuple
 import time
+import re
 
 st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
 
@@ -69,48 +70,74 @@ DATA_SOURCES = [
     }
 ]
 
-def extract_relevant_keywords(text: str, categories: Dict[str, List[str]]) -> Dict[str, List[str]]:
-    """Extract potentially relevant keywords from text based on categories"""
-    text_lower = text.lower()
-    relevant_keywords = {}
+def extract_keywords_from_text(text: str) -> Set[str]:
+    """Extract all meaningful words from text, excluding stop words"""
+    # Clean text and split into words
+    words = re.findall(r'\w+', text.lower())
     
-    for category, keywords in categories.items():
-        matches = []
-        for keyword in keywords:
-            # Check for both exact and partial matches
-            if keyword.lower() in text_lower or any(
-                term in text_lower for term in keyword.lower().split()
-            ):
-                matches.append(keyword)
-        if matches:
-            relevant_keywords[category] = matches
+    # Filter out stop words and short words
+    keywords = {word for word in words 
+               if word not in NORWEGIAN_STOP_WORDS 
+               and len(word) > 2
+               and not word.isdigit()}
     
-    return relevant_keywords
+    return keywords
 
-def render_keyword_selection(suggested_keywords: Dict[str, List[str]], key_prefix: str = "") -> Set[str]:
+def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[str]:
     """Render interactive keyword selection interface"""
     selected_keywords = set()
     
-    st.write("#### 🏷️ Foreslåtte nøkkelord")
-    st.write("Klikk for å fjerne irrelevante nøkkelord:")
+    st.write("#### 🏷️ Velg relevante nøkkelord")
+    st.write("Klikk for å velge/fjerne nøkkelord som er relevante for seminaret:")
     
-    for category, keywords in suggested_keywords.items():
-        if keywords:  # Only show categories with matches
-            st.write(f"**{category}:**")
-            cols = st.columns(4)  # Adjust number of columns based on your needs
-            for idx, keyword in enumerate(keywords):
-                col_idx = idx % 4
-                with cols[col_idx]:
-                    if st.button(
-                        f"❌ {keyword}",
-                        key=f"{key_prefix}_{category}_{keyword}",
-                        type="secondary",
-                        use_container_width=True
-                    ):
-                        # Button click means remove/ignore this keyword
-                        pass
-                    else:
-                        selected_keywords.add(keyword)
+    # Create columns for keyword display
+    num_cols = 6  # Increase number of columns
+    cols = st.columns(num_cols)
+    
+    # Create a dictionary to track button states
+    if 'keyword_states' not in st.session_state:
+        st.session_state.keyword_states = {}
+    
+    # Display keywords in columns
+    for idx, keyword in enumerate(sorted(keywords)):
+        col_idx = idx % num_cols
+        with cols[col_idx]:
+            # Initialize state for this keyword if not exists
+            key = f"{key_prefix}_{keyword}"
+            if key not in st.session_state.keyword_states:
+                st.session_state.keyword_states[key] = True  # Default to selected
+            
+            # Create toggle button with custom styling
+            if st.button(
+                "✓ " + keyword if st.session_state.keyword_states[key] else "○ " + keyword,
+                key=key,
+                type="secondary",
+                use_container_width=True,
+                help=f"Click to toggle '{keyword}'",
+                # Custom CSS for smaller, lighter buttons
+                args=(),
+                kwargs={'style': '''
+                    <style>
+                        div[data-testid="stButton"] button {
+                            padding: 2px 8px;
+                            font-size: 0.8em;
+                            background-color: #f0f2f6;
+                            border: none;
+                            margin: 2px 0;
+                        }
+                        div[data-testid="stButton"] button:hover {
+                            background-color: #e0e2e6;
+                        }
+                    </style>
+                '''}
+            ):
+                # Toggle state when clicked
+                st.session_state.keyword_states[key] = not st.session_state.keyword_states[key]
+                st.rerun()
+            
+            # Add to selected keywords if state is True
+            if st.session_state.keyword_states[key]:
+                selected_keywords.add(keyword)
     
     return selected_keywords
     
@@ -347,19 +374,20 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
     
-    # Add cache clear button
-    if st.button("Clear Cache"):
-        st.cache_data.clear()
-        st.rerun()
+    # Move initial information to expander
+    with st.expander("ℹ️ Tips og informasjon", expanded=False):
+        st.info("""
+        💡 Tips for bedre resultater:
+        - Vær spesifikk om temaet
+        - Inkluder nøkkelord og konsepter
+        - Beskriv formålet med seminaret
+        """)
+        
+        # Add cache clear button here
+        if st.button("Clear Cache"):
+            st.cache_data.clear()
+            st.rerun()
     
-    # Add topic guidance
-    st.info("""
-    💡 Tips for bedre resultater:
-    - Vær spesifikk om temaet
-    - Inkluder nøkkelord og konsepter
-    - Beskriv formålet med seminaret
-    """)
-
     # Check for API key
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("OpenAI API key not found in secrets!")
@@ -367,27 +395,27 @@ def main():
     
     api_key = st.secrets["OPENAI_API_KEY"]
     
-    # Load data - Move this outside of any control flow
-    all_data = []
-    for source_config in DATA_SOURCES:
-        source_df = load_source_data(source_config)
-        if source_df is not None:
-            all_data.append(source_df)
-    
-    if not all_data:
-        st.error("Could not load any data sources. Please check the data files.")
-        st.stop()
-    
-    # Create the combined DataFrame early
-    df = pd.concat(all_data, ignore_index=True)
-    st.write(f"Total records loaded: {len(df)}")
-    
-    # Process embeddings early
-    cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+    # Load data with status in expander
+    with st.expander("📊 Data status", expanded=False):
+        all_data = []
+        for source_config in DATA_SOURCES:
+            source_df = load_source_data(source_config)
+            if source_df is not None:
+                all_data.append(source_df)
+        
+        if not all_data:
+            st.error("Could not load any data sources. Please check the data files.")
+            st.stop()
+        
+        df = pd.concat(all_data, ignore_index=True)
+        st.write(f"Total records loaded: {len(df)}")
+        
+        # Process embeddings
+        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
-    selected_keywords = set()  # Initialize selected_keywords
+    selected_keywords = set()
 
     with col1:
         query = st.text_area(
@@ -397,16 +425,17 @@ def main():
         )
         
         if query:
-            # Extract and display suggested keywords
-            suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
-            if suggested_keywords:
+            # Extract all meaningful keywords from the query
+            extracted_keywords = extract_keywords_from_text(query)
+            
+            if extracted_keywords:
                 st.divider()
-                selected_keywords = render_keyword_selection(suggested_keywords)
+                selected_keywords = render_keyword_selection(extracted_keywords)
                 
                 if selected_keywords:
-                    st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
+                    st.caption(f"Valgte nøkkelord: {len(selected_keywords)}")
             else:
-                st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
+                st.info("Ingen nøkkelord funnet i beskrivelsen. Vennligst prøv å være mer spesifikk.")
 
     with col2:
         num_suggestions = st.slider(
