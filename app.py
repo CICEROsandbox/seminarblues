@@ -18,7 +18,102 @@ Din oppgave er å analysere foreslåtte deltakere og:
 Bruk en uformell, men profesjonell tone. Vær konkret i anbefalingene.
 """
 
-# Rest of the imports and DATA_SOURCES configuration remains the same...
+# Configuration
+DATA_SOURCES = [
+    {
+        "name": "arendalsuka",
+        "file_path": "data/arendalsuka_events.csv",
+        "text_columns": ['title', 'header', 'om_arrangementet'],
+        "speaker_column": 'medvirkende',
+        "date_column": 'date',
+        "event_column": 'title'
+    },
+    {
+        "name": "parliament_hearings",
+        "file_path": "data/stortinget-hearings.csv",
+        "text_columns": ['Høringssak', 'Innhold - høring'],
+        "speaker_column": 'Innsender',
+        "event_column": 'Høringssak',
+        "separator": ";"
+    }
+]
+
+@st.cache_data
+def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
+    """Load and prepare data from a single source"""
+    try:
+        separator = source_config.get("separator", ",")
+        df = pd.read_csv(source_config["file_path"], sep=separator)
+        df = df.dropna(how='all')
+        
+        # Combine specified text columns for embedding
+        df['combined_text'] = ''
+        for col in source_config["text_columns"]:
+            if col in df.columns:
+                df['combined_text'] += ' ' + df[col].fillna('')
+        
+        df['combined_text'] = df['combined_text'].str.strip()
+        df['source'] = source_config["name"]
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading data from {source_config['name']}: {str(e)}")
+        return None
+
+def get_embedding(text, client):
+    """Get embeddings for a text using OpenAI"""
+    try:
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-ada-002"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        st.error(f"Error getting embedding: {str(e)}")
+        return None
+
+def find_similar_content(query_text, df, client, top_k=5):
+    """Find similar content and extract speakers"""
+    query_embedding = get_embedding(query_text, client)
+    if not query_embedding:
+        return []
+    
+    # Calculate similarities
+    embeddings = [get_embedding(text, client) for text in df['combined_text']]
+    similarities = []
+    for emb in embeddings:
+        if emb:  # Check if embedding was successfully created
+            similarity = 1 - cosine(query_embedding, emb)
+            similarities.append(similarity)
+        else:
+            similarities.append(0)  # No similarity if embedding failed
+    
+    # Get top similar entries
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
+    
+    results = []
+    for idx in top_indices:
+        entry = df.iloc[idx]
+        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
+        
+        # Get speaker/organization info
+        speakers = []
+        if pd.notna(entry[source_config["speaker_column"]]):
+            if '\n' in str(entry[source_config["speaker_column"]]):
+                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
+            else:
+                speakers = [entry[source_config["speaker_column"]].strip()]
+        
+        # Add result
+        results.append({
+            'speakers': speakers,
+            'similarity': similarities[idx],
+            'source': entry['source'],
+            'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
+            'combined_text': entry['combined_text']
+        })
+    
+    return results
 
 def get_gpt_analysis(query: str, speakers: List[Dict], client: OpenAI) -> str:
     """Get GPT analysis of the suggestions based on the seminar topic"""
@@ -114,7 +209,7 @@ def main():
                 results = find_similar_content(query, filtered_df, client, top_k=num_suggestions)
                 
                 if results:
-                    # Process speakers (same as before)
+                    # Process speakers
                     speakers_dict = {}
                     for result in results:
                         for speaker in result['speakers']:
