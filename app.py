@@ -89,6 +89,8 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
     progress_bar.empty()
     return embeddings
 
+# Remove the GPT-related parts and modify the find_similar_content function:
+
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5) -> List[Dict]:
     """Find similar content using pre-computed embeddings"""
@@ -98,22 +100,34 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     
     # Calculate similarities for all entries
     similarities = []
-    for emb in cached_embeddings:
+    texts_for_debug = []  # For debugging
+    for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Add a small random factor to break ties and avoid perfect matches
-            similarity = (1 - cosine(query_embedding, emb)) * 0.95  # Scale down slightly
+            similarity = 1 - cosine(query_embedding, emb)
             similarities.append(similarity)
+            # Store some debug info
+            texts_for_debug.append((df.iloc[i]['combined_text'][:100], similarity))
         else:
             similarities.append(0)
+    
+    # Debug: Show top 3 matched texts and their scores
+    st.write("Debug - Top 3 matched texts:")
+    sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
+    for text, score in sorted_debug:
+        st.write(f"Score {score:.3f}: {text}...")
     
     # Create a dataframe with similarities for better handling
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
-        'similarity': similarities
+        'similarity': similarities,
+        'text': df['combined_text'].tolist()  # Add text for verification
     })
     
-    # Get top_k most similar entries, but only if they're actually similar
-    top_indices = similarity_df[similarity_df['similarity'] > 0.1].nlargest(top_k, 'similarity')['index'].tolist()
+    # Filter out low similarities first
+    similarity_df = similarity_df[similarity_df['similarity'] > 0.2]
+    
+    # Get top_k most similar entries
+    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
     
     results = []
     for idx in top_indices:
@@ -132,13 +146,61 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         results.append({
             'index': idx,
             'speakers': speakers,
-            'similarity': float(similarities[idx]),  # Ensure it's a float
+            'similarity': float(similarities[idx]),
             'source': entry['source'],
             'context': entry[source_config["event_column"]] if source_config["event_column"] in entry else '',
             'content': entry[source_config["content_column"]] if source_config["content_column"] in entry else '',
         })
     
     return results
+
+# In the main() function, remove the GPT analysis part and modify the results display:
+                if results:
+                    # Process speakers with better tracking of sources
+                    speakers_dict = {}
+                    for result in results:
+                        for speaker in result['speakers']:
+                            speaker_key = f"{speaker}_{result['index']}"
+                            if speaker_key not in speakers_dict or result['similarity'] > speakers_dict[speaker_key]['similarity']:
+                                speakers_dict[speaker_key] = {
+                                    'name': speaker,
+                                    'similarity': result['similarity'],
+                                    'context': result['context'],
+                                    'content': result['content'],
+                                    'source': result['source']
+                                }
+                    
+                    # Convert to list and sort
+                    speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
+                    speakers.sort(key=lambda x: x['similarity'], reverse=True)
+                    
+                    if speakers:
+                        # Display detailed results
+                        st.subheader(f"🎯 Fant {len(speakers)} potensielle deltakere")
+                        
+                        for i, speaker in enumerate(speakers, 1):
+                            with st.expander(
+                                f"🎤 {speaker['name']} - {speaker['similarity']:.1%} relevans", 
+                                expanded=i<=3
+                            ):
+                                cols = st.columns([2, 1])
+                                with cols[0]:
+                                    if speaker['source'] == 'arendalsuka':
+                                        st.write("**Deltaker i arrangement:**", speaker['context'])
+                                        if pd.notna(speaker['content']):
+                                            st.write("**Arrangementsbeskrivelse:**")
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+                                    else:  # parliament hearings
+                                        st.write("**Innspill til høring:**", speaker['context'])
+                                        if pd.notna(speaker['content']):
+                                            st.write("**Høringsinnspill:**")
+                                            st.markdown(f"<div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{speaker['content']}</div>", unsafe_allow_html=True)
+                                    
+                                    st.write("**Kilde:**", 
+                                           "Arendalsuka" if speaker['source'] == "arendalsuka" 
+                                           else "Stortingshøringer")
+                                with cols[1]:
+                                    st.metric("Relevans", f"{speaker['similarity']:.1%}")
 
 def get_gpt_analysis(query: str, speakers: List[Dict], api_key: str) -> Optional[str]:
     """Get GPT analysis of the suggestions"""
