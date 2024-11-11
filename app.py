@@ -98,32 +98,42 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Simple keyword boost for better topic matching
+            # Check for health-related terms in both query and content
             text = df.iloc[i]['combined_text'].lower()
-            query_terms = query_text.lower().split()
+            query_terms = set(query_text.lower().split())
+            health_terms = {'helse', 'helsepolitikk', 'folkehelse', 'sykdom', 'pasient', 'behandling'}
             
-            # Apply boost based on keyword matches
+            # Calculate matching terms
+            matching_health_terms = len(query_terms.intersection(health_terms))
+            text_contains_health = any(term in text for term in health_terms)
+            
+            # Apply targeted boost for health-related content
             boost = 1.0
-            for term in query_terms:
-                if term in text:
-                    boost += 0.2  # 20% boost per matching term
+            if matching_health_terms > 0 and text_contains_health:
+                boost += 0.3  # Significant boost for health content matching query
+            elif text_contains_health:
+                boost += 0.1  # Small boost for health content
             
-            # Apply boosted similarity but cap at 0.95
-            final_similarity = min(cos_sim * boost, 0.95)
+            # Calculate final similarity with more granular scaling
+            final_similarity = cos_sim * boost * 0.9  # Scale down overall to allow for differentiation
             similarities.append(final_similarity)
             
-            # Store debug info
-            texts_for_debug.append((df.iloc[i]['combined_text'][:100], final_similarity))
+            # Store debug info with more detail
+            texts_for_debug.append((
+                df.iloc[i]['combined_text'][:100],
+                final_similarity,
+                "HEALTH MATCH" if text_contains_health else "NO HEALTH"
+            ))
         else:
             similarities.append(0)
     
-    # Debug: Show top 3 matched texts
+    # Debug: Show top 3 matched texts with more information
     st.write("Debug - Top 3 matched texts:")
     sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
-    for text, score in sorted_debug:
-        st.write(f"Score {score:.3f}: {text}...")
+    for text, score, health_status in sorted_debug:
+        st.write(f"Score {score:.3f} [{health_status}]: {text}...")
     
-    # Create a dataframe with similarities for better handling
+    # Create a dataframe with similarities and additional info
     similarity_df = pd.DataFrame({
         'index': range(len(similarities)),
         'similarity': similarities,
