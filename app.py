@@ -51,36 +51,149 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
 
 @st.cache_data
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
-    """Get embedding for a single text using OpenAI API"""
+    """Get embedding for a single text using OpenAI API with verification"""
     try:
         client = OpenAI(api_key=_api_key)
+        # Preprocess text to ensure it's clean
+        cleaned_text = _text.strip()
+        if not cleaned_text:
+            return None
+            
         response = client.embeddings.create(
-            input=_text,
+            input=cleaned_text,
             model="text-embedding-ada-002"
         )
-        return response.data[0].embedding
+        embedding = response.data[0].embedding
+        
+        # Verify we got a valid embedding
+        if not embedding or len(embedding) != 1536:  # OpenAI embeddings should be 1536-dimensional
+            st.error(f"Invalid embedding received for text: {_text[:100]}...")
+            return None
+            
+        return embedding
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
+def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+                        _api_key: str, top_k: int = 5) -> List[Dict]:
+    """Find similar content with improved debugging and verification"""
+    # Get query embedding
+    query_embedding = get_embedding(query_text, _api_key)
+    if not query_embedding:
+        st.error("Failed to get query embedding")
+        return []
+    
+    # Debug: Print query information
+    st.write("Debug - Query Info:")
+    st.write(f"Query text: {query_text}")
+    st.write(f"Query embedding size: {len(query_embedding)}")
+    
+    # Calculate similarities for all entries
+    similarities = []
+    texts_for_debug = []
+    
+    for i, emb in enumerate(cached_embeddings):
+        if emb and len(emb) == len(query_embedding):
+            # Calculate cosine similarity
+            cos_sim = 1 - cosine(query_embedding, emb)
+            
+            # Apply more nuanced scaling
+            if cos_sim < 0.5:  # Low relevance
+                scaled_similarity = cos_sim * 0.5
+            elif cos_sim < 0.7:  # Medium relevance
+                scaled_similarity = 0.25 + (cos_sim - 0.5) * 1.5
+            else:  # High relevance
+                scaled_similarity = 0.55 + (cos_sim - 0.7) * 1.5
+                
+            similarities.append(scaled_similarity)
+            texts_for_debug.append((df.iloc[i]['combined_text'][:200], cos_sim, scaled_similarity))
+        else:
+            similarities.append(0)
+            if emb:
+                st.warning(f"Embedding size mismatch at index {i}: {len(emb)} vs {len(query_embedding)}")
+    
+    # Enhanced debug information
+    with st.expander("Debug Information", expanded=True):
+        st.write("Query:", query_text)
+        st.write("Top 5 matched texts (with scores):")
+        sorted_debug = sorted(texts_for_debug, key=lambda x: x[2], reverse=True)[:5]
+        for text, raw_sim, scaled_sim in sorted_debug:
+            st.write("\nText:", text)
+            st.write(f"Raw similarity: {raw_sim:.3f}")
+            st.write(f"Scaled similarity: {scaled_sim:.3f}")
+            st.write("---")
+    
+    # Create similarity DataFrame
+    similarity_df = pd.DataFrame({
+        'index': range(len(similarities)),
+        'similarity': similarities
+    })
+    
+    # Filter low-relevance results
+    threshold = 0.3
+    similarity_df = similarity_df[similarity_df['similarity'] > threshold]
+    
+    # Get top_k matches
+    top_indices = similarity_df.nlargest(top_k, 'similarity')['index'].tolist()
+    
+    results = []
+    for idx in top_indices:
+        entry = df.iloc[idx]
+        source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
+        
+        speakers = []
+        if pd.notna(entry[source_config["speaker_column"]]):
+            if '\n' in str(entry[source_config["speaker_column"]]):
+                speakers = [s.strip() for s in entry[source_config["speaker_column"]].split('\n')]
+            else:
+                speakers = [entry[source_config["speaker_column"]].strip()]
+        
+        final_similarity = similarities[idx]
+        
+        results.append({
+            'index': idx,
+            'speakers': speakers,
+            'similarity': final_similarity,
+            'source': entry['source'],
+            'context': entry.get(source_config["event_column"], ''),
+            'content': entry.get(source_config["content_column"], ''),
+        })
+    
+    return results
+
 @st.cache_data
 def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Optional[List[float]]]:
-    """Process all texts and get their embeddings with caching"""
+    """Process texts with improved error checking and debugging"""
     embeddings = []
     total = len(texts)
     
     progress_text = "Calculating embeddings..."
     progress_bar = st.progress(0, text=progress_text)
     
+    # Debug counters
+    successful = 0
+    failed = 0
+    
     for i, text in enumerate(texts):
         emb = get_embedding(text, _api_key)
-        embeddings.append(emb)
+        if emb:
+            successful += 1
+            embeddings.append(emb)
+        else:
+            failed += 1
+            embeddings.append(None)
+            st.warning(f"Failed to get embedding for text: {text[:100]}...")
         
         # Update progress
         progress = (i + 1) / total
         progress_bar.progress(progress, text=f"{progress_text} ({i+1}/{total})")
     
     progress_bar.empty()
+    
+    # Show embedding statistics
+    st.write(f"Embeddings processed: {successful} successful, {failed} failed")
+    
     return embeddings
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
