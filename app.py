@@ -6,6 +6,9 @@ from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional, Set, Tuple
 import time
 
+# Must be the first Streamlit command
+st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
+
 # Add the stop words list here, right after the imports and before DATA_SOURCES:
 NORWEGIAN_STOP_WORDS = {
     'og', 'i', 'jeg', 'det', 'at', 'en', 'et', 'den', 'til', 'er', 'som', 'på',
