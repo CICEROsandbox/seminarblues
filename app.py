@@ -35,6 +35,16 @@ CLIMATE_KEYWORDS = {
     'transport', 'utslipp', 'vindkraft', 'klimaendring'
 }
 
+CLIMATE_CATEGORIES = {
+    'Klimaendringer': ['klimaendring', 'ekstremvær', 'hetebølger', 'flom', 'temperaturendringer', 'nedbørsendringer'],
+    'Energi': ['energiforbruk', 'fornybar energi', 'hydrogen', 'vindkraft', 'energipolitikk'],
+    'Utslipp': ['co2-utslipp', 'metan', 'karbonbudsjett', 'utslippsscenarier'],
+    'Politikk og Omstilling': ['klimapolitikk', 'klimaforhandlingene', 'rettferdig omstilling', 'klimaomstilling'],
+    'Miljø og Ressurser': ['arealbruk', 'skog', 'sirkulærøkonomi', 'mat og landbruk'],
+    'Tilpasning og Risiko': ['klimarisiko', 'tilpasning', 'klimatjenester'],
+    'Samfunn og Helse': ['helse', 'luftforurensning', 'klimakommunikasjon', 'aksept']
+}
+
 # Configuration
 DATA_SOURCES = [
     {
@@ -57,6 +67,51 @@ DATA_SOURCES = [
     }
 ]
 
+def extract_relevant_keywords(text: str, categories: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Extract potentially relevant keywords from text based on categories"""
+    text_lower = text.lower()
+    relevant_keywords = {}
+    
+    for category, keywords in categories.items():
+        matches = []
+        for keyword in keywords:
+            # Check for both exact and partial matches
+            if keyword.lower() in text_lower or any(
+                term in text_lower for term in keyword.lower().split()
+            ):
+                matches.append(keyword)
+        if matches:
+            relevant_keywords[category] = matches
+    
+    return relevant_keywords
+
+def render_keyword_selection(suggested_keywords: Dict[str, List[str]], key_prefix: str = "") -> Set[str]:
+    """Render interactive keyword selection interface"""
+    selected_keywords = set()
+    
+    st.write("#### 🏷️ Foreslåtte nøkkelord")
+    st.write("Klikk for å fjerne irrelevante nøkkelord:")
+    
+    for category, keywords in suggested_keywords.items():
+        if keywords:  # Only show categories with matches
+            st.write(f"**{category}:**")
+            cols = st.columns(4)  # Adjust number of columns based on your needs
+            for idx, keyword in enumerate(keywords):
+                col_idx = idx % 4
+                with cols[col_idx]:
+                    if st.button(
+                        f"❌ {keyword}",
+                        key=f"{key_prefix}_{category}_{keyword}",
+                        type="secondary",
+                        use_container_width=True
+                    ):
+                        # Button click means remove/ignore this keyword
+                        pass
+                    else:
+                        selected_keywords.add(keyword)
+    
+    return selected_keywords
+    
 @st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source"""
@@ -344,6 +399,18 @@ def main():
             height=100,
             placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
         )
+    if query:
+            # Extract and display suggested keywords
+            suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
+            if suggested_keywords:
+                st.divider()
+                selected_keywords = render_keyword_selection(suggested_keywords)
+                
+                # Show selected keywords count
+                if selected_keywords:
+                    st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
+            else:
+                st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
     
     with col2:
         num_suggestions = st.slider(
@@ -372,16 +439,19 @@ def main():
     if st.button("Finn deltakere", type="primary"):
         if query:
             with st.spinner("Søker etter relevante deltakere..."):
+                # Use selected keywords in similarity calculation
                 source_mask = df['source'].isin(selected_sources)
                 filtered_df = df[source_mask].reset_index(drop=True)
                 filtered_embeddings = [emb for emb, mask in zip(cached_embeddings, source_mask) if mask]
                 
+                # Pass selected keywords to find_similar_content
                 results = find_similar_content(
-                    query, 
-                    filtered_df, 
+                    query,
+                    filtered_df,
                     filtered_embeddings,
-                    api_key, 
-                    top_k=num_suggestions
+                    api_key,
+                    top_k=num_suggestions,
+                    boost_keywords=selected_keywords  # New parameter
                 )
                 
                 if results:
