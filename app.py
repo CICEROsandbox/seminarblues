@@ -385,41 +385,45 @@ def main():
     cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create input layout
-    col1, col2, col3 = st.columns([2, 1, 1])
+# Create input layout
+col1, col2, col3 = st.columns([2, 1, 1])
+
+with col1:
+    query = st.text_area(
+        "Beskriv seminar-temaet:",
+        height=100,
+        placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
+    )
     
-    with col1:
-        query = st.text_area(
-            "Beskriv seminar-temaet:",
-            height=100,
-            placeholder="Eksempel: Et seminar om klimatilpasning og hetebølger, med fokus på helsekonsekvenser for eldre."
-        )
+    # Note: This block should be at the same indentation level as the query text_area
     if query:
+        # Extract and display suggested keywords
         suggested_keywords = extract_relevant_keywords(query, CLIMATE_CATEGORIES)
-            if suggested_keywords:
+        if suggested_keywords:
             st.divider()
-            st.session_state.selected_keywords = render_keyword_selection(suggested_keywords)
-                
-                # Show selected keywords count
-    if 'selected_keywords' not in st.session_state:
-            st.session_state.selected_keywords = set()
-            else:
-                st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
+            selected_keywords = render_keyword_selection(suggested_keywords)
+            
+            # Show selected keywords count
+            if selected_keywords:
+                st.caption(f"Bruker {len(selected_keywords)} nøkkelord for matching")
+        else:
+            st.info("Ingen spesifikke nøkkelord funnet i beskrivelsen. Bruker generell semantisk matching.")
+
+with col2:
+    num_suggestions = st.slider(
+        "Antall forslag å vurdere:",
+        min_value=3,
+        max_value=15,
+        value=5
+    )
     
-    with col2:
-        num_suggestions = st.slider(
-            "Antall forslag å vurdere:",
-            min_value=3,
-            max_value=15,
-            value=5
-        )
-        
-        min_similarity = st.slider(
-            "Minimum relevans (0-1):",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.35,  # Increased from 0.15
-            step=0.05
-        )
+    min_similarity = st.slider(
+        "Minimum relevans (0-1):",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.35,
+        step=0.05
+    )
     
     with col3:
         selected_sources = st.multiselect(
