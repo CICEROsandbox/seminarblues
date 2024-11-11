@@ -344,7 +344,6 @@ def process_texts_for_embeddings(texts: List[str], _api_key: str) -> List[Option
     return embeddings
 
 def main():
-    st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
     
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
