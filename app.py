@@ -85,33 +85,34 @@ def process_texts_for_embeddings(texts: List[str], api_key: str) -> List[Optiona
 
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5) -> List[Dict]:
-    """Find similar content using pre-computed embeddings"""
+    """Find similar content using pre-computed embeddings with updated relevance scoring"""
     query_embedding = get_embedding_cached(query_text, api_key)
     if not query_embedding:
         return []
     
+    # Extract keywords from query to boost relevance
+    keywords = query_text.lower().split()
+    
     # Calculate similarities for all entries
     similarities = []
-    texts_for_debug = []  # For debugging
     for i, emb in enumerate(cached_embeddings):
         if emb:
-            # Calculate raw cosine similarity - this captures semantic similarity
+            # Calculate raw cosine similarity
             cos_sim = 1 - cosine(query_embedding, emb)
             
-            # Scale the similarity to prevent clustering at the top
-            # Using a more gradual scaling that preserves relative differences
-            scaled_similarity = cos_sim * 0.8  # Scale down to allow differentiation
+            # Apply log scaling to reduce clustering at the top
+            scaled_similarity = np.log1p(cos_sim) * 0.8
             
-            similarities.append(scaled_similarity)
-            texts_for_debug.append((df.iloc[i]['combined_text'][:200], scaled_similarity))
+            # Check for keyword match to boost similarity
+            entry_text = df.iloc[i]['combined_text'].lower()
+            keyword_overlap = sum(1 for kw in keywords if kw in entry_text)
+            boost_factor = 0.05 * keyword_overlap  # Adjust boost as needed
+            
+            # Apply boosted similarity
+            final_similarity = scaled_similarity + boost_factor
+            similarities.append(final_similarity)
         else:
             similarities.append(0)
-    
-    # Debug: Show top 3 matched texts with similarity scores
-    st.write("Debug - Top 3 matched texts:")
-    sorted_debug = sorted(texts_for_debug, key=lambda x: x[1], reverse=True)[:3]
-    for text, score in sorted_debug:
-        st.write(f"Score {score:.3f}: {text}...")
     
     # Create a dataframe with similarities
     similarity_df = pd.DataFrame({
@@ -240,8 +241,8 @@ def main():
                                     'content': result['content'],
                                     'source': result['source']
                                 }
-                    
-                    # Convert to list and sort
+               
+                     # Convert to list and sort by similarity
                     speakers = [info for info in speakers_dict.values() if info['similarity'] >= min_similarity]
                     speakers.sort(key=lambda x: x['similarity'], reverse=True)
                     
@@ -294,3 +295,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
