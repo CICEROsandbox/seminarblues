@@ -569,11 +569,11 @@ def main():
     
     # Load data with status in expander
     with st.expander("📊 Data status", expanded=False):
-    all_data = []
-    for source_config in DATA_SOURCES:
-        source_df = load_source_data(source_config, api_key)
-        if source_df is not None:
-            all_data.append(source_df)
+        all_data = []
+        for source_config in DATA_SOURCES:
+            source_df = load_source_data(source_config, api_key)
+            if source_df is not None:
+                all_data.append(source_df)
     
     if not all_data:
         st.error("Could not load any data sources. Please check the data files.")
