@@ -161,8 +161,58 @@ DATA_SOURCES = [
         "event_column": 'Høringssak',
         "content_column": 'Innhold - høring',
         "separator": ";"
+    },
+    {
+        "name": "arendalsuka2023",
+        "file_path": "data/arendalsuka2023.csv",
+        "text_columns": ['summary'],
+        "speaker_column": 'summary',
+        "event_column": 'summary',
+        "content_column": 'summary',
+        "extract_names": True
     }
 ]
+
+@st.cache_data
+def extract_names_with_llm(text: str, api_key: str) -> List[str]:
+    """Extract names from text using OpenAI's API"""
+    if not text or not isinstance(text, str):
+        return []
+    
+    try:
+        client = OpenAI(api_key=api_key)
+        prompt = f"""Analyze this Norwegian text and extract all person names mentioned. 
+        Only return names of actual people - not organizations, places, or other entities.
+        Return the names as a Python list of strings. If no names are found, return an empty list.
+        
+        Text: {text}
+        
+        Format your response as Python code that can be evaluated, like this:
+        ["Name 1", "Name 2", "Name 3"]
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that extracts person names from Norwegian text. Only output the Python list of names, nothing else."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+        
+        # Extract and evaluate the response
+        try:
+            names_list = eval(response.choices[0].message.content.strip())
+            if isinstance(names_list, list):
+                return [name.strip() for name in names_list if isinstance(name, str)]
+        except:
+            pass
+        
+        return []
+        
+    except Exception as e:
+        st.error(f"Error extracting names: {str(e)}")
+        return []
 
 def extract_keywords_from_text(text: str) -> Set[str]:
     """Extract all meaningful words from text, excluding stop words"""
@@ -236,7 +286,7 @@ def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[st
     return selected_keywords
     
 @st.cache_data(show_spinner=True)
-def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
+def load_source_data(source_config: Dict, api_key: str) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source"""
     try:
         st.write(f"Loading data from {source_config['name']}...")
@@ -253,12 +303,29 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         df['combined_text'] = df['combined_text'].str.strip()
         df['source'] = source_config["name"]
         
+        # Handle name extraction if needed
+        if source_config.get("extract_names", False):
+            # Extract names using LLM
+            with st.spinner(f"Extracting names from {source_config['name']}..."):
+                progress_bar = st.progress(0)
+                extracted_speakers = []
+                
+                for idx, row in df.iterrows():
+                    names = extract_names_with_llm(row[source_config["speaker_column"]], api_key)
+                    extracted_speakers.append(names)
+                    progress_bar.progress((idx + 1) / len(df))
+                
+                progress_bar.empty()
+                
+                # Convert list of names to string format similar to other sources
+                df['medvirkende'] = ['\n'.join(names) if names else '' for names in extracted_speakers]
+        
         st.write(f"Loaded {len(df)} rows from {source_config['name']}")
         return df
     except Exception as e:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
-
+        
 @st.cache_data(ttl=300)
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text"""
@@ -502,21 +569,21 @@ def main():
     
     # Load data with status in expander
     with st.expander("📊 Data status", expanded=False):
-        all_data = []
-        for source_config in DATA_SOURCES:
-            source_df = load_source_data(source_config)
-            if source_df is not None:
-                all_data.append(source_df)
-        
-        if not all_data:
-            st.error("Could not load any data sources. Please check the data files.")
-            st.stop()
-        
-        df = pd.concat(all_data, ignore_index=True)
-        st.write(f"Total records loaded: {len(df)}")
+    all_data = []
+    for source_config in DATA_SOURCES:
+        source_df = load_source_data(source_config, api_key)
+        if source_df is not None:
+            all_data.append(source_df)
+    
+    if not all_data:
+        st.error("Could not load any data sources. Please check the data files.")
+        st.stop()
+    
+    df = pd.concat(all_data, ignore_index=True)
+    st.write(f"Total records loaded: {len(df)}")
         
         # Process embeddings
-        cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
+    cached_embeddings = process_texts_for_embeddings(df['combined_text'].tolist(), api_key)
     
     # Create input layout
     col1, col2, col3 = st.columns([2, 1, 1])
