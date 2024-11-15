@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from openai.embeddings_utils import get_embedding  # Requires OpenAI API
+import openai  # Make sure the openai package is installed and configured with an API key
 from scipy.spatial.distance import cosine
 import hashlib
 import os
@@ -61,7 +61,7 @@ def generate_embeddings_cache(file_path: str, text_column: str = TEXT_COLUMN, mo
         print(f"Generating embeddings for {file_path}...")
         data = pd.read_csv(file_path)
         texts = data[text_column].fillna("").tolist()
-        embeddings = np.array([get_embedding(text, model=model) for text in texts])
+        embeddings = np.array([get_embedding_for_text(text) for text in texts])
         np.save(cache_file, embeddings)
         print(f"Cached embeddings saved to {cache_file}.")
     
@@ -87,7 +87,7 @@ all_embeddings = load_all_embeddings()
 def get_embedding_for_text(text: str) -> Optional[List[float]]:
     """Get embedding for a single text for query processing."""
     try:
-        response = openai.embeddings.create(input=text, model=EMBEDDING_MODEL)
+        response = openai.Embedding.create(input=text, model=EMBEDDING_MODEL)
         return response['data'][0]['embedding']
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
@@ -114,7 +114,7 @@ def main():
         st.error("OpenAI API key not found in secrets!")
         st.stop()
     
-    api_key = st.secrets["OPENAI_API_KEY"]
+    openai.api_key = st.secrets["OPENAI_API_KEY"]
     query = st.text_area("Beskriv seminar-temaet:", height=100, placeholder="Eksempel: Et seminar om klimatilpasning...")
     boost_keywords = extract_keywords_from_text(query)
     
