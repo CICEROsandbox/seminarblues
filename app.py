@@ -24,6 +24,16 @@ st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layo
 NORWEGIAN_STOP_WORDS = {...}  # Keep your full set here
 CLIMATE_KEYWORDS = {...}  # Keep your full set here
 
+@st.cache_data(ttl=300)
+def get_embedding_for_text(text: str) -> Optional[List[float]]:
+    """Get embedding for a single text for query processing."""
+    try:
+        response = openai.Embedding.create(input=text, model=EMBEDDING_MODEL)
+        return response['data'][0]['embedding']
+    except Exception as e:
+        st.error(f"Error getting embedding: {str(e)}")
+        return None
+
 def hash_file(file_path: str) -> str:
     """Generate a hash for a file to check for changes."""
     with open(file_path, 'rb') as f:
@@ -75,16 +85,6 @@ def load_all_embeddings(data_sources: List[Dict]) -> Dict[str, np.ndarray]:
 
 # Load all cached embeddings at the start of the app
 all_embeddings = load_all_embeddings(DATA_SOURCES)
-
-@st.cache_data(ttl=300)
-def get_embedding_for_text(text: str) -> Optional[List[float]]:
-    """Get embedding for a single text for query processing."""
-    try:
-        response = openai.Embedding.create(input=text, model=EMBEDDING_MODEL)
-        return response['data'][0]['embedding']
-    except Exception as e:
-        st.error(f"Error getting embedding: {str(e)}")
-        return None
 
 def extract_keywords_from_text(text: str) -> Set[str]:
     """Extract all meaningful words from text, excluding stop words."""
