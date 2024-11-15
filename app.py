@@ -7,8 +7,7 @@ import hashlib
 import os
 import glob
 import re
-import time
-from typing import List, Dict, Tuple, Optional, Set
+from typing import List, Dict, Tuple, Set, Optional
 
 # Configuration
 DATA_DIRECTORY = "data"
@@ -17,10 +16,33 @@ TEXT_COLUMN = "description"  # Adjust to your specific column name if needed
 
 st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
 
-# Define stop words, keywords, etc. as in your original code
-NORWEGIAN_STOP_WORDS = {...}
-CLIMATE_KEYWORDS = {...}
-CLIMATE_CATEGORIES = {...}
+# Define stop words, keywords, etc.
+NORWEGIAN_STOP_WORDS = {
+    'og', 'i', 'jeg', 'det', 'at', 'en', 'et', 'den', 'til', 'er', 'som', 'på',
+    'de', 'med', 'han', 'av', 'ikke', 'der', 'så', 'var', 'meg', 'seg', 'men',
+    'ett', 'har', 'om', 'vi', 'min', 'mitt', 'ha', 'hadde', 'hun', 'nå', 'over',
+    'da', 'ved', 'fra', 'du', 'ut', 'sin', 'dem', 'oss', 'opp', 'man', 'kan',
+    'hans', 'hvor', 'eller', 'hva', 'skal', 'selv', 'sjøl', 'her', 'alle',
+    'vil', 'bli', 'ble', 'blitt', 'kunne', 'inn', 'når', 'være', 'kom', 'noen',
+    'noe', 'ville', 'dere', 'deres', 'kun', 'ja', 'etter', 'ned', 'skulle',
+    'denne', 'for', 'deg', 'si', 'sine', 'sitt', 'mot', 'å', 'meget', 'hvorfor',
+    'dette', 'disse', 'uten', 'hvordan', 'ingen', 'din', 'ditt', 'blir', 'samme',
+    'hvilken', 'hvilke', 'sånn', 'inni', 'mellom', 'vår', 'hver', 'hvem', 'vors',
+    'hvis', 'både', 'bare', 'enn', 'fordi', 'før', 'mange', 'også', 'slik',
+    'vært', 'begge', 'siden', 'henne', 'hennes', 'lære'
+}
+
+CLIMATE_KEYWORDS = {
+    'aksept', 'arealbruk', 'arktis', 'co2', 'utslipp', 'ekstremvær', 
+    'energiforbruk', 'energipolitikk', 'flom', 'klimapanel', 'forbruk',
+    'fornybar', 'energi', 'klima', 'helse', 'hetebølge', 'hydrogen',
+    'karbon', 'karbonfangst', 'klimabudsjett', 'klimafinans', 
+    'klimaforhandling', 'klimakommunikasjon', 'klimamodell', 'klimaomstilling',
+    'klimapolitikk', 'klimarisiko', 'klimatjeneste', 'luftforurensning',
+    'landbruk', 'metan', 'nedbør', 'olje', 'gass', 'atmosfære', 'omstilling',
+    'sirkulærøkonomi', 'skog', 'teknologi', 'temperatur', 'tilpasning',
+    'transport', 'utslipp', 'vindkraft', 'klimaendring', 'EU'
+}
 
 def hash_file(file_path: str) -> str:
     """Generate a hash for a file to check for changes."""
@@ -71,9 +93,18 @@ def get_embedding_for_text(text: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def calculate_similarity(query_embedding: List[float], doc_embedding: List[float]) -> float:
-    """Calculate cosine similarity between query and document embeddings."""
-    return 1 - cosine(query_embedding, doc_embedding)
+def extract_keywords_from_text(text: str) -> Set[str]:
+    """Extract all meaningful words from text, excluding stop words."""
+    words = re.findall(r'\w+', text.lower())
+    keywords = {word for word in words if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+    return keywords
+
+def calculate_similarity(query_embedding: List[float], doc_embedding: List[float], boost_keywords: Set[str], doc_text: str) -> float:
+    """Calculate a custom similarity score with emphasis on boosted keywords."""
+    base_similarity = 1 - cosine(query_embedding, doc_embedding)
+    doc_keywords = extract_keywords_from_text(doc_text)
+    keyword_match_score = len(doc_keywords.intersection(boost_keywords)) / (len(boost_keywords) + 1)
+    return 0.7 * base_similarity + 0.3 * keyword_match_score
 
 def main():
     st.title("🎯 Seminar Deltaker Forslag")
@@ -85,7 +116,8 @@ def main():
     
     api_key = st.secrets["OPENAI_API_KEY"]
     query = st.text_area("Beskriv seminar-temaet:", height=100, placeholder="Eksempel: Et seminar om klimatilpasning...")
-
+    boost_keywords = extract_keywords_from_text(query)
+    
     if st.button("Finn deltakere"):
         if query:
             with st.spinner("Søker etter relevante deltakere..."):
@@ -98,8 +130,8 @@ def main():
                 for file_path, embeddings in all_embeddings.items():
                     data = pd.read_csv(file_path)
                     for i, doc_embedding in enumerate(embeddings):
-                        similarity = calculate_similarity(query_embedding, doc_embedding)
-                        if similarity > 0.3:  # Filter for minimum similarity threshold
+                        similarity = calculate_similarity(query_embedding, doc_embedding, boost_keywords, data.iloc[i][TEXT_COLUMN])
+                        if similarity > 0.3:
                             results.append({
                                 "source": file_path,
                                 "similarity": similarity,
