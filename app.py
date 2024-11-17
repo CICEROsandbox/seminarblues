@@ -183,7 +183,7 @@ def calculate_similarity(
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate similarity with improved topic specificity"""
+    """Calculate similarity with better category matching"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
@@ -194,42 +194,40 @@ def calculate_similarity(
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Create topic-specific keyword sets
-    transport_keywords = {
-        'elbil', 'transport', 'bil', 'kjøretøy', 'lading', 'bilpark',
-        'veitransport', 'nullutslipp', 'fossilfri'
-    }
+    # Find which categories the query matches
+    matching_categories = set()
+    for category, terms in CLIMATE_CATEGORIES.items():
+        if any(term.lower() in query_lower for term in terms):
+            matching_categories.add(category)
     
-    policy_keywords = {
-        'avgift', 'klimaavgift', 'co2-avgift', 'veibruksavgift', 'incentiv',
-        'støtteordning', 'tilskudd', 'regulering', 'skattelette'
-    }
+    # Calculate category matches in document
+    category_matches = 0
+    category_terms_found = set()
+    for category in matching_categories:
+        terms = CLIMATE_CATEGORIES[category]
+        for term in terms:
+            if term.lower() in doc_lower:
+                category_matches += 1
+                category_terms_found.add(term)
     
-    # Calculate topic-specific matches
-    transport_matches = sum(1 for word in transport_keywords if word in query_lower) > 0 and \
-                       sum(1 for word in transport_keywords if word in doc_lower) > 0
-                       
-    policy_matches = sum(1 for word in policy_keywords if word in query_lower) > 0 and \
-                    sum(1 for word in policy_keywords if word in doc_lower) > 0
-    
-    # Word matching calculations with topic focus
+    # Word matching calculations
     query_words = {word for word in query_lower.split() 
                   if word not in NORWEGIAN_STOP_WORDS 
-                  and len(word) > 2 
-                  and word.lower() not in {'norge', 'norsk', 'norske'}}
+                  and len(word) > 2}
     
     doc_words = {word for word in doc_lower.split() 
                 if word not in NORWEGIAN_STOP_WORDS 
                 and len(word) > 2}
     
-    matching_words = query_words.intersection(doc_words)
+    # Find all matching words including category terms
+    matching_words = query_words.intersection(doc_words).union(category_terms_found)
     
     # Calculate climate keyword relevance
     climate_words_doc = {word for word in doc_words if any(
         climate_term in word for climate_term in CLIMATE_KEYWORDS
     )}
     
-    # Selected keywords boost with higher specificity
+    # Selected keywords boost
     selected_keyword_matches = 0
     if boost_keywords:
         selected_keyword_matches = sum(
@@ -240,21 +238,20 @@ def calculate_similarity(
     else:
         selected_keyword_ratio = 0
     
-    # Topic relevance bonus
-    topic_bonus = 0.3 if (transport_matches or policy_matches) else 0
+    # Category matching bonus
+    category_bonus = category_matches / max(len(matching_categories), 1) if matching_categories else 0
     
     # Calculate final score with adjusted weights
     final_score = (
-        0.25 * max(0, cos_sim) +                # Reduced base similarity weight
-        0.20 * len(climate_words_doc) / 10 +    # Climate relevance
+        0.25 * max(0, cos_sim) +                # Semantic similarity
+        0.30 * category_bonus +                 # Increased weight for category matches
         0.25 * selected_keyword_ratio +         # Selected keywords
-        0.15 * len(matching_words) / max(len(query_words), 1) + # General matches
-        0.15 * topic_bonus                      # Topic specificity bonus
+        0.20 * len(matching_words) / max(len(query_words), 1)  # Word matches
     )
     
-    # More aggressive threshold adjustments
-    if not (transport_matches or policy_matches):
-        final_score *= 0.5  # Penalize documents not matching main topics
+    # Threshold adjustments
+    if not matching_categories:
+        final_score *= 0.5  # Penalize documents not matching any relevant categories
     
     if final_score < 0.3:
         final_score *= 0.5
@@ -262,7 +259,41 @@ def calculate_similarity(
         final_score = 0.8 + (final_score - 0.8) * 0.5
     
     return final_score, matching_words
-def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+
+def highlight_text(text: str, keywords: Set[str]) -> str:
+    """Highlight keywords in text using HTML with improved matching"""
+    if not text or not keywords:
+        return text
+    
+    # Prepare the text and keywords
+    text_lower = text.lower()
+    highlighted_text = text
+    
+    # Create a mapping of lowercase to original case keywords
+    keyword_mapping = {}
+    for keyword in keywords:
+        # Find all occurrences in original text preserving case
+        matches = re.finditer(re.escape(keyword.lower()), text_lower)
+        for match in matches:
+            start, end = match.span()
+            original_case = text[start:end]
+            keyword_mapping[original_case.lower()] = original_case
+    
+    # Sort keywords by length (longest first) to avoid partial matches
+    sorted_keywords = sorted(keyword_mapping.keys(), key=len, reverse=True)
+    
+    # Highlight each keyword
+    for keyword_lower in sorted_keywords:
+        original_case = keyword_mapping[keyword_lower]
+        pattern = re.compile(f'({re.escape(original_case)})', re.IGNORECASE)
+        highlighted_text = pattern.sub(
+            r'<span style="background-color: #fff3cd; padding: 0.1rem; border-radius: 0.2rem;">\1</span>',
+            highlighted_text
+        )
+    
+    return highlighted_text
+    
+    def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
     """Find similar content with climate research context"""
     climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
