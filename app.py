@@ -6,6 +6,7 @@ from scipy.spatial.distance import cosine
 from typing import Dict, List, Optional, Set, Tuple
 import time
 import re
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
 
@@ -73,8 +74,10 @@ DATA_SOURCES = [
         "speaker_column": 'person_names',
         "event_column": 'description',
         "content_column": 'summary',
-        "separator": ","
+        "separator": ",",
+        "organization_column": 'organization_names'  # Add this line
     }
+]
 ]
 
 def extract_keywords_from_text(text: str) -> Set[str]:
@@ -87,18 +90,65 @@ def extract_keywords_from_text(text: str) -> Set[str]:
     return keywords
 
 @st.cache_data(show_spinner=True)
+def extract_names_from_org(speaker_names: str, org_names: str) -> str:
+    """Extract individual names from organization text"""
+    names = set()
+    
+    # Add existing speaker names
+    if speaker_names:
+        names.update(name.strip() for name in speaker_names.split(','))
+    
+    # Extract names from organization field
+    if org_names:
+        # Split on common separators
+        parts = re.split(r'[,/&]', org_names)
+        for part in parts:
+            # Look for person names (assuming capitalized words)
+            potential_names = re.findall(r'\b[A-ZÆØÅ][a-zæøå]+(?:\s+[A-ZÆØÅ][a-zæøå]+)*\b', part)
+            names.update(potential_names)
+    
+    # Remove common organization words
+    org_words = {'AS', 'ASA', 'Norge', 'Norwegian', 'Norsk', 'Forbund', 'Forening'}
+    names = {name for name in names if name not in org_words}
+    
+    return ', '.join(sorted(names))
+
+@st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
-    """Load and prepare data from a single source"""
+    """Load and prepare data from a single source with improved text processing"""
     try:
         st.write(f"Loading data from {source_config['name']}...")
         separator = source_config.get("separator", ",")
         df = pd.read_csv(source_config["file_path"], sep=separator)
         df = df.dropna(how='all')
         
+        # Improved text combination
         df['combined_text'] = ''
         for col in source_config["text_columns"]:
             if col in df.columns:
-                df['combined_text'] += ' ' + df[col].fillna('')
+                # Clean and normalize text
+                cleaned_text = df[col].fillna('').astype(str).apply(
+                    lambda x: re.sub(r'\s+', ' ', x.strip())  # Remove extra whitespace
+                )
+                # Handle truncated text
+                cleaned_text = cleaned_text.apply(
+                    lambda x: x[:-3] if x.endswith('...') else x
+                )
+                df['combined_text'] += ' ' + cleaned_text
+        
+        # Improve person names handling
+        if source_config["speaker_column"] in df.columns:
+            # Clean person names
+            df[source_config["speaker_column"]] = df[source_config["speaker_column"]].fillna('')
+            # Extract names from organization fields if available
+            if 'organization_names' in df.columns:
+                df[source_config["speaker_column"]] = df.apply(
+                    lambda row: extract_names_from_org(
+                        row[source_config["speaker_column"]],
+                        row['organization_names'] if 'organization_names' in df.columns else ''
+                    ),
+                    axis=1
+                )
         
         df['combined_text'] = df['combined_text'].str.strip()
         df['source'] = source_config["name"]
@@ -108,7 +158,7 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     except Exception as e:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
-
+        
 @st.cache_data(ttl=300)
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text"""
