@@ -183,26 +183,43 @@ def calculate_similarity(
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with emphasis on climate research relevance"""
+    """Calculate semantic similarity with better thematic weighting"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
+    # Base semantic similarity
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
+    # Text preprocessing
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
+    # Word matching calculations
     query_words = {word for word in query_lower.split() 
-                  if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
-    doc_words = {word for word in doc_lower.split() 
-                if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
+                  if word not in NORWEGIAN_STOP_WORDS 
+                  and len(word) > 2 
+                  and word.lower() not in {'norge', 'norsk', 'norske'}}  # Exclude geographic terms
     
+    doc_words = {word for word in doc_lower.split() 
+                if word not in NORWEGIAN_STOP_WORDS 
+                and len(word) > 2}
+    
+    # Find matching words
     matching_words = query_words.intersection(doc_words)
+    
+    # Calculate climate keyword relevance with higher weight
+    climate_words_query = {word for word in query_words if any(
+        climate_term in word for climate_term in CLIMATE_KEYWORDS
+    )}
     
     climate_words_doc = {word for word in doc_words if any(
         climate_term in word for climate_term in CLIMATE_KEYWORDS
     )}
     
+    # Calculate climate relevance score
+    climate_relevance = len(climate_words_query.intersection(climate_words_doc)) / max(len(climate_words_query), 1)
+    
+    # Selected keywords boost
     selected_keyword_matches = 0
     if boost_keywords:
         selected_keyword_matches = sum(
@@ -213,13 +230,15 @@ def calculate_similarity(
     else:
         selected_keyword_ratio = 0
     
+    # Adjust weights to emphasize thematic matching
     final_score = (
-        0.50 * max(0, cos_sim) +
-        0.20 * selected_keyword_ratio +
-        0.20 * len(climate_words_doc) / 10 +
-        0.10 * len(matching_words) / len(query_words) if query_words else 0
+        0.35 * max(0, cos_sim) +                # Reduced weight for semantic similarity
+        0.25 * climate_relevance +              # Increased weight for climate relevance
+        0.25 * selected_keyword_ratio +         # Increased weight for selected keywords
+        0.15 * len(matching_words) / max(len(query_words), 1)  # Reduced weight for general word matching
     )
     
+    # Threshold adjustments
     if final_score < 0.2:
         final_score *= 0.5
     elif final_score > 0.8:
