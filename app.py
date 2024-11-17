@@ -68,6 +68,15 @@ DATA_SOURCES = [
         "content_column": 'Innhold - høring',
         "separator": ";"
     }
+        {
+        "name": "Arendalsuka 2023",
+        "file_path": "data/arendalsuka_2023_eventsognavn.csv",
+        "text_columns": ['description', 'summary'],
+        "speaker_column": 'person_names', 'organization_names',
+        "event_column": 'description',
+        "content_column": 'summary',
+        "separator": ","
+    }
 ]
 
 def extract_keywords_from_text(text: str) -> Set[str]:
