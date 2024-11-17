@@ -183,7 +183,7 @@ def calculate_similarity(
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with better thematic weighting"""
+    """Calculate similarity with improved topic specificity"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
@@ -194,32 +194,42 @@ def calculate_similarity(
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Word matching calculations
+    # Create topic-specific keyword sets
+    transport_keywords = {
+        'elbil', 'transport', 'bil', 'kjøretøy', 'lading', 'bilpark',
+        'veitransport', 'nullutslipp', 'fossilfri'
+    }
+    
+    policy_keywords = {
+        'avgift', 'klimaavgift', 'co2-avgift', 'veibruksavgift', 'incentiv',
+        'støtteordning', 'tilskudd', 'regulering', 'skattelette'
+    }
+    
+    # Calculate topic-specific matches
+    transport_matches = sum(1 for word in transport_keywords if word in query_lower) > 0 and \
+                       sum(1 for word in transport_keywords if word in doc_lower) > 0
+                       
+    policy_matches = sum(1 for word in policy_keywords if word in query_lower) > 0 and \
+                    sum(1 for word in policy_keywords if word in doc_lower) > 0
+    
+    # Word matching calculations with topic focus
     query_words = {word for word in query_lower.split() 
                   if word not in NORWEGIAN_STOP_WORDS 
                   and len(word) > 2 
-                  and word.lower() not in {'norge', 'norsk', 'norske'}}  # Exclude geographic terms
+                  and word.lower() not in {'norge', 'norsk', 'norske'}}
     
     doc_words = {word for word in doc_lower.split() 
                 if word not in NORWEGIAN_STOP_WORDS 
                 and len(word) > 2}
     
-    # Find matching words
     matching_words = query_words.intersection(doc_words)
     
-    # Calculate climate keyword relevance with higher weight
-    climate_words_query = {word for word in query_words if any(
-        climate_term in word for climate_term in CLIMATE_KEYWORDS
-    )}
-    
+    # Calculate climate keyword relevance
     climate_words_doc = {word for word in doc_words if any(
         climate_term in word for climate_term in CLIMATE_KEYWORDS
     )}
     
-    # Calculate climate relevance score
-    climate_relevance = len(climate_words_query.intersection(climate_words_doc)) / max(len(climate_words_query), 1)
-    
-    # Selected keywords boost
+    # Selected keywords boost with higher specificity
     selected_keyword_matches = 0
     if boost_keywords:
         selected_keyword_matches = sum(
@@ -230,22 +240,28 @@ def calculate_similarity(
     else:
         selected_keyword_ratio = 0
     
-    # Adjust weights to emphasize thematic matching
+    # Topic relevance bonus
+    topic_bonus = 0.3 if (transport_matches or policy_matches) else 0
+    
+    # Calculate final score with adjusted weights
     final_score = (
-        0.35 * max(0, cos_sim) +                # Reduced weight for semantic similarity
-        0.25 * climate_relevance +              # Increased weight for climate relevance
-        0.25 * selected_keyword_ratio +         # Increased weight for selected keywords
-        0.15 * len(matching_words) / max(len(query_words), 1)  # Reduced weight for general word matching
+        0.25 * max(0, cos_sim) +                # Reduced base similarity weight
+        0.20 * len(climate_words_doc) / 10 +    # Climate relevance
+        0.25 * selected_keyword_ratio +         # Selected keywords
+        0.15 * len(matching_words) / max(len(query_words), 1) + # General matches
+        0.15 * topic_bonus                      # Topic specificity bonus
     )
     
-    # Threshold adjustments
-    if final_score < 0.2:
+    # More aggressive threshold adjustments
+    if not (transport_matches or policy_matches):
+        final_score *= 0.5  # Penalize documents not matching main topics
+    
+    if final_score < 0.3:
         final_score *= 0.5
     elif final_score > 0.8:
         final_score = 0.8 + (final_score - 0.8) * 0.5
     
     return final_score, matching_words
-
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
     """Find similar content with climate research context"""
