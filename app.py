@@ -79,19 +79,13 @@ DATA_SOURCES = [
     }
 ]
 
-def extract_keywords_from_text(text: str) -> Set[str]:
-    """Extract all meaningful words from text, excluding stop words"""
-    words = re.findall(r'\w+', text.lower())
-    keywords = {word for word in words 
-               if word not in NORWEGIAN_STOP_WORDS 
-               and len(word) > 2
-               and not word.isdigit()}
-    return keywords
-
-@st.cache_data(show_spinner=True)
 def extract_names_from_org(speaker_names: str, org_names: str) -> str:
     """Extract individual names from organization text"""
     names = set()
+    
+    # Handle NaN values
+    speaker_names = '' if pd.isna(speaker_names) else str(speaker_names)
+    org_names = '' if pd.isna(org_names) else str(org_names)
     
     # Add existing speaker names
     if speaker_names:
@@ -112,6 +106,51 @@ def extract_names_from_org(speaker_names: str, org_names: str) -> str:
     
     return ', '.join(sorted(names))
 
+@st.cache_data(show_spinner=True)
+def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
+    """Load and prepare data from a single source with improved text processing"""
+    try:
+        st.write(f"Loading data from {source_config['name']}...")
+        separator = source_config.get("separator", ",")
+        df = pd.read_csv(source_config["file_path"], sep=separator)
+        df = df.dropna(how='all')
+        
+        # Improved text combination
+        df['combined_text'] = ''
+        for col in source_config["text_columns"]:
+            if col in df.columns:
+                # Clean and normalize text
+                cleaned_text = df[col].fillna('').astype(str).apply(
+                    lambda x: re.sub(r'\s+', ' ', x.strip())  # Remove extra whitespace
+                )
+                # Handle truncated text
+                cleaned_text = cleaned_text.apply(
+                    lambda x: x[:-3] if x.endswith('...') else x
+                )
+                df['combined_text'] += ' ' + cleaned_text
+        
+        # Improve person names handling
+        if source_config["speaker_column"] in df.columns:
+            # Clean person names
+            df[source_config["speaker_column"]] = df[source_config["speaker_column"]].fillna('')
+            # Extract names from organization fields if available
+            if source_config.get("organization_column") and source_config["organization_column"] in df.columns:
+                df[source_config["speaker_column"]] = df.apply(
+                    lambda row: extract_names_from_org(
+                        row[source_config["speaker_column"]],
+                        row[source_config["organization_column"]]
+                    ),
+                    axis=1
+                )
+        
+        df['combined_text'] = df['combined_text'].str.strip()
+        df['source'] = source_config["name"]
+        
+        st.write(f"Loaded {len(df)} rows from {source_config['name']}")
+        return df
+    except Exception as e:
+        st.error(f"Error loading data from {source_config['name']}: {str(e)}")
+        return None
 @st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source with improved text processing"""
