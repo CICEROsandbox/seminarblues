@@ -105,7 +105,6 @@ def extract_names_from_org(speaker_names: str, org_names: str) -> str:
     names = {name for name in names if name not in org_words}
     
     return ', '.join(sorted(names))
-
 @st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source with improved text processing"""
@@ -151,52 +150,7 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     except Exception as e:
         st.error(f"Error loading data from {source_config['name']}: {str(e)}")
         return None
-@st.cache_data(show_spinner=True)
-def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
-    """Load and prepare data from a single source with improved text processing"""
-    try:
-        st.write(f"Loading data from {source_config['name']}...")
-        separator = source_config.get("separator", ",")
-        df = pd.read_csv(source_config["file_path"], sep=separator)
-        df = df.dropna(how='all')
-        
-        # Improved text combination
-        df['combined_text'] = ''
-        for col in source_config["text_columns"]:
-            if col in df.columns:
-                # Clean and normalize text
-                cleaned_text = df[col].fillna('').astype(str).apply(
-                    lambda x: re.sub(r'\s+', ' ', x.strip())  # Remove extra whitespace
-                )
-                # Handle truncated text
-                cleaned_text = cleaned_text.apply(
-                    lambda x: x[:-3] if x.endswith('...') else x
-                )
-                df['combined_text'] += ' ' + cleaned_text
-        
-        # Improve person names handling
-        if source_config["speaker_column"] in df.columns:
-            # Clean person names
-            df[source_config["speaker_column"]] = df[source_config["speaker_column"]].fillna('')
-            # Extract names from organization fields if available
-            if 'organization_names' in df.columns:
-                df[source_config["speaker_column"]] = df.apply(
-                    lambda row: extract_names_from_org(
-                        row[source_config["speaker_column"]],
-                        row['organization_names'] if 'organization_names' in df.columns else ''
-                    ),
-                    axis=1
-                )
-        
-        df['combined_text'] = df['combined_text'].str.strip()
-        df['source'] = source_config["name"]
-        
-        st.write(f"Loaded {len(df)} rows from {source_config['name']}")
-        return df
-    except Exception as e:
-        st.error(f"Error loading data from {source_config['name']}: {str(e)}")
-        return None
-        
+
 @st.cache_data(ttl=300)
 def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     """Get embedding for a single text"""
@@ -210,6 +164,15 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
     except Exception as e:
         st.error(f"Error getting embedding: {str(e)}")
         return None
+
+def extract_keywords_from_text(text: str) -> Set[str]:
+    """Extract all meaningful words from text, excluding stop words"""
+    words = re.findall(r'\w+', text.lower())
+    keywords = {word for word in words 
+               if word not in NORWEGIAN_STOP_WORDS 
+               and len(word) > 2
+               and not word.isdigit()}
+    return keywords
 
 def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[str]:
     """Render interactive keyword selection interface"""
@@ -349,38 +312,20 @@ def calculate_similarity(
     return final_score, matching_words
 
 def highlight_text(text: str, keywords: Set[str]) -> str:
-    """Highlight keywords in text using HTML with improved matching"""
+    """Highlight keywords in text using HTML"""
     if not text or not keywords:
         return text
     
-    # Prepare the text and keywords
-    text_lower = text.lower()
     highlighted_text = text
-    
-    # Create a mapping of lowercase to original case keywords
-    keyword_mapping = {}
-    for keyword in keywords:
-        # Find all occurrences in original text preserving case
-        matches = re.finditer(re.escape(keyword.lower()), text_lower)
-        for match in matches:
-            start, end = match.span()
-            original_case = text[start:end]
-            keyword_mapping[original_case.lower()] = original_case
-    
-    # Sort keywords by length (longest first) to avoid partial matches
-    sorted_keywords = sorted(keyword_mapping.keys(), key=len, reverse=True)
-    
-    # Highlight each keyword
-    for keyword_lower in sorted_keywords:
-        original_case = keyword_mapping[keyword_lower]
-        pattern = re.compile(f'({re.escape(original_case)})', re.IGNORECASE)
+    for keyword in sorted(keywords, key=len, reverse=True):
+        pattern = re.compile(f'({re.escape(keyword)})', re.IGNORECASE)
         highlighted_text = pattern.sub(
             r'<span style="background-color: #fff3cd; padding: 0.1rem; border-radius: 0.2rem;">\1</span>',
             highlighted_text
         )
     
     return highlighted_text
-    
+
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
     api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
     """Find similar content with climate research context"""
@@ -459,21 +404,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             })
     
     return sorted(results, key=lambda x: x['similarity'], reverse=True)[:top_k]
-
-def highlight_text(text: str, keywords: Set[str]) -> str:
-    """Highlight keywords in text using HTML"""
-    if not text or not keywords:
-        return text
-    
-    highlighted_text = text
-    for keyword in sorted(keywords, key=len, reverse=True):
-        pattern = re.compile(f'({re.escape(keyword)})', re.IGNORECASE)
-        highlighted_text = pattern.sub(
-            r'<span style="background-color: #fff3cd; padding: 0.1rem; border-radius: 0.2rem;">\1</span>',
-            highlighted_text
-        )
-    
-    return highlighted_text
 
 def main():
     st.title("🎯 Seminar Deltaker Forslag")
