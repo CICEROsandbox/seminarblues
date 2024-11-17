@@ -9,7 +9,6 @@ import re
 
 st.set_page_config(page_title="Seminar Deltaker Forslag", page_icon="🎯", layout="wide")
 
-# Norwegian stop words
 NORWEGIAN_STOP_WORDS = {
     'og', 'i', 'jeg', 'det', 'at', 'en', 'et', 'den', 'til', 'er', 'som', 'på',
     'de', 'med', 'han', 'av', 'ikke', 'der', 'så', 'var', 'meg', 'seg', 'men',
@@ -48,7 +47,6 @@ CLIMATE_CATEGORIES = {
     'Samfunn og Helse': ['helse', 'luftforurensning', 'klimakommunikasjon', 'aksept']
 }
 
-# Configuration
 DATA_SOURCES = [
     {
         "name": "arendalsuka",
@@ -79,6 +77,15 @@ DATA_SOURCES = [
     }
 ]
 
+def extract_keywords_from_text(text: str) -> Set[str]:
+    """Extract all meaningful words from text, excluding stop words"""
+    words = re.findall(r'\w+', text.lower())
+    keywords = {word for word in words 
+               if word not in NORWEGIAN_STOP_WORDS 
+               and len(word) > 2
+               and not word.isdigit()}
+    return keywords
+
 @st.cache_data(show_spinner=True)
 def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
     """Load and prepare data from a single source"""
@@ -88,7 +95,6 @@ def load_source_data(source_config: Dict) -> Optional[pd.DataFrame]:
         df = pd.read_csv(source_config["file_path"], sep=separator)
         df = df.dropna(how='all')
         
-        # Combine specified text columns for embedding
         df['combined_text'] = ''
         for col in source_config["text_columns"]:
             if col in df.columns:
@@ -117,19 +123,6 @@ def get_embedding(_text: str, _api_key: str) -> Optional[List[float]]:
         st.error(f"Error getting embedding: {str(e)}")
         return None
 
-def extract_keywords_from_text(text: str) -> Set[str]:
-    """Extract all meaningful words from text, excluding stop words"""
-    # Clean text and split into words
-    words = re.findall(r'\w+', text.lower())
-    
-    # Filter out stop words and short words
-    keywords = {word for word in words 
-               if word not in NORWEGIAN_STOP_WORDS 
-               and len(word) > 2
-               and not word.isdigit()}
-    
-    return keywords
-
 def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[str]:
     """Render interactive keyword selection interface"""
     selected_keywords = set()
@@ -137,15 +130,12 @@ def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[st
     st.write("#### 🏷️ Velg relevante nøkkelord")
     st.write("Klikk for å velge/fjerne nøkkelord som er relevante for seminaret:")
     
-    # Create columns for keyword display
     num_cols = 4
     cols = st.columns(num_cols)
     
-    # Initialize session state for keywords if not exists
     if 'keyword_states' not in st.session_state:
         st.session_state.keyword_states = {}
     
-    # Custom CSS for keyword buttons
     st.markdown("""
         <style>
         .stButton > button {
@@ -164,39 +154,55 @@ def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[st
         }
         </style>
     """, unsafe_allow_html=True)
-  def calculate_similarity(
+    
+    for idx, keyword in enumerate(sorted(keywords)):
+        col_idx = idx % num_cols
+        with cols[col_idx]:
+            key = f"{key_prefix}_{keyword}"
+            if key not in st.session_state.keyword_states:
+                st.session_state.keyword_states[key] = True
+            
+            if st.button(
+                "✓ " + keyword if st.session_state.keyword_states[key] else "○ " + keyword,
+                key=key,
+                help=f"Click to toggle '{keyword}'",
+                use_container_width=True
+            ):
+                st.session_state.keyword_states[key] = not st.session_state.keyword_states[key]
+                st.rerun()
+            
+            if st.session_state.keyword_states[key]:
+                selected_keywords.add(keyword)
+    
+    return selected_keywords
+
+def calculate_similarity(
     query_embedding: List[float],
     doc_embedding: List[float],
     query_text: str,
     doc_text: str,
     boost_keywords: Set[str] = None
 ) -> Tuple[float, Set[str]]:
-    """Calculate semantic similarity with emphasis on climate research relevance and selected keywords"""
+    """Calculate semantic similarity with emphasis on climate research relevance"""
     if not query_embedding or not doc_embedding:
         return 0.0, set()
     
-    # Base similarity calculation
     cos_sim = 1 - cosine(query_embedding, doc_embedding)
     
-    # Text preprocessing
     query_lower = query_text.lower()
     doc_lower = doc_text.lower()
     
-    # Word matching calculations
     query_words = {word for word in query_lower.split() 
                   if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
     doc_words = {word for word in doc_lower.split() 
                 if word not in NORWEGIAN_STOP_WORDS and len(word) > 2}
     
-    # Find matching words
     matching_words = query_words.intersection(doc_words)
     
-    # Calculate climate keyword relevance
     climate_words_doc = {word for word in doc_words if any(
         climate_term in word for climate_term in CLIMATE_KEYWORDS
     )}
     
-    # Selected keywords boost
     selected_keyword_matches = 0
     if boost_keywords:
         selected_keyword_matches = sum(
@@ -207,15 +213,13 @@ def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[st
     else:
         selected_keyword_ratio = 0
     
-    # Calculate final score with components
     final_score = (
-        0.50 * max(0, cos_sim) +                # Base semantic similarity
-        0.20 * selected_keyword_ratio +         # Selected keywords boost
-        0.20 * len(climate_words_doc) / 10 +    # Climate terms presence
-        0.10 * len(matching_words) / len(query_words) if query_words else 0  # General relevance
+        0.50 * max(0, cos_sim) +
+        0.20 * selected_keyword_ratio +
+        0.20 * len(climate_words_doc) / 10 +
+        0.10 * len(matching_words) / len(query_words) if query_words else 0
     )
     
-    # Apply threshold adjustments
     if final_score < 0.2:
         final_score *= 0.5
     elif final_score > 0.8:
@@ -226,7 +230,6 @@ def render_keyword_selection(keywords: Set[str], key_prefix: str = "") -> Set[st
 def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
                         api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
     """Find similar content with climate research context"""
-    # Add climate research context to the query
     climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
     enhanced_query = climate_context + query_text
     
@@ -234,10 +237,7 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
     if not query_embedding:
         return []
     
-    # Calculate similarities
     similarities = []
-    texts_for_debug = []
-    
     for i, emb in enumerate(cached_embeddings):
         if emb:
             similarity, matching_words = calculate_similarity(
@@ -254,13 +254,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
                 'source': df.iloc[i]['source'],
                 'matching_words': matching_words
             })
-            
-            texts_for_debug.append((
-                df.iloc[i]['combined_text'][:200],
-                similarity,
-                df.iloc[i]['source'],
-                matching_words
-            ))
         else:
             similarities.append({
                 'index': i,
@@ -279,7 +272,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         reverse=True
     )
     
-    # Group by source while respecting max_per_source
     for sim in sorted_similarities:
         source = sim['source']
         if source not in results_by_source:
@@ -287,7 +279,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
         if len(results_by_source[source]) < max_per_source:
             results_by_source[source].append(sim)
     
-    # Prepare final results
     results = []
     for source_results in results_by_source.values():
         for sim in source_results:
@@ -295,7 +286,6 @@ def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: L
             entry = df.iloc[idx]
             source_config = next(s for s in DATA_SOURCES if s["name"] == entry['source'])
             
-            # Process speakers
             speakers = []
             if pd.notna(entry[source_config["speaker_column"]]):
                 if isinstance(entry[source_config["speaker_column"]], str):
@@ -325,7 +315,7 @@ def highlight_text(text: str, keywords: Set[str]) -> str:
     for keyword in sorted(keywords, key=len, reverse=True):
         pattern = re.compile(f'({re.escape(keyword)})', re.IGNORECASE)
         highlighted_text = pattern.sub(
-            r'<span style="background-color: #fff3cd; padding: 0.1rem; border-radius: 0.2rem;">\1</span>', 
+            r'<span style="background-color: #fff3cd; padding: 0.1rem; border-radius: 0.2rem;">\1</span>',
             highlighted_text
         )
     
@@ -335,14 +325,12 @@ def main():
     st.title("🎯 Seminar Deltaker Forslag")
     st.write("Beskriv seminaret ditt for å få forslag til relevante deltakere.")
     
-    # Check for API key
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("OpenAI API key not found in secrets!")
         st.stop()
     
     api_key = st.secrets["OPENAI_API_KEY"]
     
-    # Load data
     all_data = []
     for source_config in DATA_SOURCES:
         source_df = load_source_data(source_config)
@@ -356,7 +344,6 @@ def main():
     df = pd.concat(all_data, ignore_index=True)
     cached_embeddings = [get_embedding(text, api_key) for text in df['combined_text']]
     
-    # Input area
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -367,7 +354,6 @@ def main():
         )
         
         if query:
-            # Extract and display keywords
             extracted_keywords = extract_keywords_from_text(query)
             if extracted_keywords:
                 selected_keywords = render_keyword_selection(extracted_keywords)
@@ -426,7 +412,6 @@ def main():
                                     st.metric("Relevans", f"{result['similarity']:.1%}")
                                     st.write("**Kilde:**", result['source'])
                     
-                    # Add download button
                     if results:
                         st.download_button(
                             "Last ned forslag som CSV",
