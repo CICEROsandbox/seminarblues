@@ -293,9 +293,9 @@ def highlight_text(text: str, keywords: Set[str]) -> str:
     
     return highlighted_text
     
-    def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
-                        api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
-    """Find similar content with climate research context"""  # <-- Note the indentation here    
+def find_similar_content(query_text: str, df: pd.DataFrame, cached_embeddings: List[List[float]], 
+    api_key: str, top_k: int = 5, boost_keywords: Set[str] = None) -> List[Dict]:
+    """Find similar content with climate research context"""
     climate_context = "I kontekst av klimaforskning, energi, og bærekraftig omstilling: "
     enhanced_query = climate_context + query_text
     
