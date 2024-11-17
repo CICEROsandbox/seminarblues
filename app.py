@@ -75,9 +75,8 @@ DATA_SOURCES = [
         "event_column": 'description',
         "content_column": 'summary',
         "separator": ",",
-        "organization_column": 'organization_names'  # Add this line
+        "organization_column": 'organization_names'
     }
-]
 ]
 
 def extract_keywords_from_text(text: str) -> Set[str]:
